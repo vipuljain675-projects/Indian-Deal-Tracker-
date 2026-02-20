@@ -35,14 +35,17 @@ function sleep(ms: number) {
 }
 
 export async function GET(req: NextRequest) {
+  // ── Auth check ──
+  // Allow if:
+  // 1. Bearer token matches CRON_SECRET (manual trigger from AdminPanel)
+  // 2. Request comes from Vercel Cron (has x-vercel-cron-signature header)
   const authHeader = req.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET || 'dev-secret';
+  const isVercelCron = req.headers.get('x-vercel-cron-signature') !== null;
+  const isValidToken = authHeader === `Bearer ${cronSecret}`;
+  const isDev = process.env.NODE_ENV === 'development';
 
-  if (
-    authHeader !== `Bearer ${cronSecret}` &&
-    req.headers.get('x-vercel-cron-signature') === null &&
-    process.env.NODE_ENV !== 'development'
-  ) {
+  if (!isValidToken && !isVercelCron && !isDev) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
@@ -55,7 +58,7 @@ export async function GET(req: NextRequest) {
   let quotaExhausted = false;
   const errors: string[] = [];
 
-  // Collect articles
+  // Collect articles from all queries
   const allArticles: any[] = [];
   for (const query of NEWS_QUERIES) {
     const articles = await fetchNewsArticles(query);
@@ -63,16 +66,23 @@ export async function GET(req: NextRequest) {
     await sleep(300);
   }
 
-  console.log(`Fetched ${allArticles.length} articles, processing...`);
+  // Deduplicate by URL
+  const seen = new Set<string>();
+  const uniqueArticles = allArticles.filter(a => {
+    if (seen.has(a.url)) return false;
+    seen.add(a.url);
+    return true;
+  });
 
-  for (const article of allArticles) {
-    // Stop if Gemini quota is exhausted — no point continuing
+  console.log(`Fetched ${uniqueArticles.length} articles, processing...`);
+
+  for (const article of uniqueArticles) {
     if (quotaExhausted) {
       totalSkipped++;
       continue;
     }
 
-    // Skip duplicates
+    // Skip if already in DB
     const existing = await dealsCollection.findOne({ sourceUrl: article.url });
     if (existing) {
       totalSkipped++;
@@ -83,35 +93,36 @@ export async function GET(req: NextRequest) {
       .filter(Boolean)
       .join('\n\n');
 
-    // 8 second delay between Gemini calls — well within 15 req/min limit
+    // 8 second delay between Groq calls — within free tier limits
     await sleep(8000);
 
     const deal = await extractDealFromText(articleText, article.url);
+
     if (!deal) {
       totalSkipped++;
       continue;
     }
 
-    // Check if extraction returned a quota error signal
     if ((deal as any).quotaExhausted) {
       quotaExhausted = true;
-      errors.push('Gemini daily quota exhausted — try again tomorrow');
+      errors.push('Groq quota exhausted — try again later');
       break;
     }
 
     try {
       await dealsCollection.insertOne({
         ...deal,
-        reviewStatus: 'pending',
+        reviewStatus: 'pending',   // ← ALWAYS pending — never goes live without approval
         sourceUrl: article.url,
         sourceTitle: article.title,
         fetchedAt: new Date(),
         createdAt: new Date(),
       });
       totalAdded++;
-      console.log(`✅ Added: ${deal.title}`);
+      console.log(`✅ Added to queue: ${deal.title}`);
     } catch (err: any) {
       if (err.code === 11000) {
+        // Duplicate key — already exists
         totalSkipped++;
       } else {
         errors.push(`${article.title}: ${err.message}`);
