@@ -1,6 +1,7 @@
 import clientPromise from "@/lib/mongodb";
 import DealsList from "@/components/DealsList";
 import StatCard from "@/components/StatCard";
+export const dynamic = 'force-dynamic'
 
 export default async function Home() {
   const client = await clientPromise;
