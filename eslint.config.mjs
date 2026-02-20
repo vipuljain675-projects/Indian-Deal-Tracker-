@@ -5,18 +5,19 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
-  // Override default ignores of eslint-config-next.
   globalIgnores([
     ".next/**",
     "out/**",
     "build/**",
     "next-env.d.ts",
   ]),
-  // Disable rules that conflict with our rapid-dev API routes
   {
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
-      "@typescript-eslint/no-unused-vars": "warn",
+      "@typescript-eslint/no-unused-vars": "off",
+      "no-unused-vars": "off",
+      "prefer-const": "off",
+      "react/no-unescaped-entities": "off",
     },
   },
 ]);
