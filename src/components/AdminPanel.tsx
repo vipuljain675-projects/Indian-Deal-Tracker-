@@ -33,6 +33,10 @@ export default function AdminPanel({ pendingDeals: initialPending, stats }: Prop
   const [cronRunning, setCronRunning] = useState(false);
   const [cronResult, setCronResult] = useState<any>(null);
 
+  // Seed historical data
+  const [seeding, setSeeding] = useState(false);
+  const [seedResult, setSeedResult] = useState<any>(null);
+
   // Tab
   const [tab, setTab] = useState<'queue' | 'url' | 'cron' | 'add'>('queue');
 
@@ -100,6 +104,22 @@ export default function AdminPanel({ pendingDeals: initialPending, stats }: Prop
       setExtractError('❌ Network error: ' + err.message);
     } finally {
       setExtracting(false);
+    }
+  }
+
+  // ── Seed Historical Data ──
+  async function handleSeed() {
+    if (!confirm('This will insert all 147 historical deals into the database. Duplicates will be skipped. Continue?')) return;
+    setSeeding(true);
+    setSeedResult(null);
+    try {
+      const res = await fetch('/api/deals/seed', { method: 'POST' });
+      const data = await res.json();
+      setSeedResult(data);
+    } catch (err: any) {
+      setSeedResult({ success: false, error: err.message });
+    } finally {
+      setSeeding(false);
     }
   }
 
@@ -442,6 +462,38 @@ export default function AdminPanel({ pendingDeals: initialPending, stats }: Prop
           </div>
 
           <div className="cron-setup">
+            <h3>🗄️ Seed Historical Data</h3>
+            <p style={{ fontSize: '0.875rem', color: '#64748b', marginBottom: '1rem' }}>
+              Load all 147 pre-built historical deals (1947–2026) into the database. Safe to run multiple times — duplicates are skipped.
+            </p>
+            <button
+              className="btn-cron"
+              onClick={handleSeed}
+              disabled={seeding}
+              style={{ background: seeding ? '#94a3b8' : '#0f172a' }}
+            >
+              {seeding ? '⏳ Seeding database...' : '🗄️ Seed 147 Historical Deals'}
+            </button>
+
+            {seedResult && (
+              <div className={`cron-result ${seedResult.success ? 'cron-success' : 'cron-error'}`} style={{ marginTop: '1rem' }}>
+                {seedResult.success ? (
+                  <>
+                    <p>✅ Seeding complete!</p>
+                    <p><strong>{seedResult.added}</strong> new deals added to dashboard</p>
+                    <p><strong>{seedResult.skipped}</strong> already existed (skipped)</p>
+                    <button className="btn-secondary" style={{ marginTop: '0.5rem' }} onClick={() => window.location.href = '/'}>
+                      View Dashboard →
+                    </button>
+                  </>
+                ) : (
+                  <p>❌ Error: {seedResult.error}</p>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="cron-setup" style={{ marginTop: '1.5rem' }}>
             <h3>Required Environment Variables</h3>
             <div className="env-list">
               <div className="env-item">
