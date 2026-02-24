@@ -60,12 +60,25 @@ export default async function Home() {
     ([, a]: any, [, b]: any) => b - a
   );
 
+  // Get top 5 deals by value for featured section
+  const featuredDeals = [...serializedDeals]
+    .sort((a: any, b: any) => {
+      const valA = parseFloat((a.value || '0').toString().replace(/[^0-9.]/g, '')) || 0;
+      const valB = parseFloat((b.value || '0').toString().replace(/[^0-9.]/g, '')) || 0;
+      return valB - valA;
+    })
+    .slice(0, 5);
+
   return (
     <div className="container dashboard-layout">
       <div className="main-content">
         <header className="hero-section">
           <h1>🇮🇳 India Deals Tracker</h1>
           <p>Defence, Trade & Strategic deals — all in one place</p>
+          <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+            <a href="/analytics" style={{ padding: '0.5rem 1rem', background: 'var(--primary)', color: 'white', textDecoration: 'none', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600 }}>📊 View Analytics</a>
+            <a href="/compare" style={{ padding: '0.5rem 1rem', background: 'white', color: 'var(--primary)', textDecoration: 'none', borderRadius: '8px', fontSize: '0.875rem', fontWeight: 600, border: '1.5px solid var(--primary)' }}>⚖️ Compare Deals</a>
+          </div>
         </header>
 
         <div className="stats-grid">
@@ -74,6 +87,48 @@ export default async function Home() {
           <StatCard label="Total Value" value={`$${totalValue.toFixed(1)}B`} icon="💰" description="Estimated USD" />
           <StatCard label="Partner Nations" value={uniqueCountries} icon="🌐" description={`${total} deals signed`} />
         </div>
+
+        {/* Featured Deals Section */}
+        {featuredDeals.length > 0 && (
+          <div style={{ marginBottom: '2rem', background: 'white', padding: '1.5rem', borderRadius: '16px', border: '1px solid var(--border)' }}>
+            <h2 style={{ margin: '0 0 1rem 0', color: 'var(--primary)', fontSize: '1.3rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              ⭐ Top 5 Deals by Value
+            </h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1rem' }}>
+              {featuredDeals.map((deal: any, idx: number) => {
+                const value = parseFloat((deal.value || '0').toString().replace(/[^0-9.]/g, '')) || 0;
+                const year = deal.date?.toString().match(/\b(19|20)\d{2}\b/)?.[0] || '';
+                return (
+                  <div
+                    key={deal._id}
+                    style={{
+                      padding: '1rem',
+                      background: '#f8fafc',
+                      border: '1px solid var(--border)',
+                      borderRadius: '10px',
+                      borderLeft: '4px solid var(--primary)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.5rem' }}>
+                      <span style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--primary)' }}>#{idx + 1}</span>
+                      {value > 0 && (
+                        <span style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--primary)' }}>${value.toFixed(1)}B</span>
+                      )}
+                    </div>
+                    <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-main)', lineHeight: 1.3 }}>
+                      {deal.title}
+                    </h3>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      <span>{deal.country}</span>
+                      {year && <span>• {year}</span>}
+                      <span>• {deal.type}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <DealsList initialDeals={sortedDeals} />
       </div>

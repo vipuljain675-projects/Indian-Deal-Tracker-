@@ -54,16 +54,43 @@ export default function DealsList({ initialDeals }: { initialDeals: any[] }) {
     country: 'All Countries',
     impact: 'All Impact',
   });
+  const [sortBy, setSortBy] = useState<'year' | 'value' | 'recent'>('year');
 
   const uniqueCountries = Array.from(new Set(deals.map(d => d.country))).sort();
 
-  const filteredDeals = deals.filter(d => {
+  const parseValue = (value: string): number => {
+    if (!value || value === '0') return 0;
+    return parseFloat(value.toString().replace(/[^0-9.]/g, '')) || 0;
+  };
+
+  const extractYear = (dateStr: string): number => {
+    if (!dateStr) return 0;
+    const match = dateStr.toString().match(/\b(19|20)\d{2}\b/);
+    return match ? parseInt(match[0]) : 0;
+  };
+
+  let filteredDeals = deals.filter(d => {
     const matchesSearch = d.title.toLowerCase().includes(filter.search.toLowerCase());
     const matchesType = filter.type === 'All Types' || d.type === filter.type;
     const matchesStatus = filter.status === 'All Status' || d.status === filter.status;
     const matchesCountry = filter.country === 'All Countries' || d.country === filter.country;
     const matchesImpact = filter.impact === 'All Impact' || d.impact === filter.impact;
     return matchesSearch && matchesType && matchesStatus && matchesCountry && matchesImpact;
+  });
+
+  // Apply sorting
+  filteredDeals = [...filteredDeals].sort((a, b) => {
+    if (sortBy === 'year') {
+      const yearA = extractYear(a.date);
+      const yearB = extractYear(b.date);
+      if (yearB !== yearA) return yearB - yearA;
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    } else if (sortBy === 'value') {
+      return parseValue(b.value) - parseValue(a.value);
+    } else if (sortBy === 'recent') {
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    }
+    return 0;
   });
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
@@ -101,7 +128,47 @@ export default function DealsList({ initialDeals }: { initialDeals: any[] }) {
           placeholder="Search deals..."
           onChange={e => setFilter({ ...filter, search: e.target.value })}
         />
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <a
+            href="/api/export?format=csv"
+            download
+            style={{
+              padding: '10px 16px',
+              background: 'var(--primary)',
+              color: 'white',
+              textDecoration: 'none',
+              borderRadius: '8px',
+              fontSize: '0.875rem',
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}
+          >
+            📥 Export CSV
+          </a>
+          <a
+            href="/api/export?format=json"
+            download
+            style={{
+              padding: '10px 16px',
+              background: 'white',
+              color: 'var(--primary)',
+              textDecoration: 'none',
+              borderRadius: '8px',
+              fontSize: '0.875rem',
+              fontWeight: 600,
+              border: '1.5px solid var(--primary)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            📥 Export JSON
+          </a>
+        </div>
         <div className="dropdowns">
+          <select value={sortBy} onChange={e => setSortBy(e.target.value as any)} style={{ fontWeight: 600 }}>
+            <option value="year">📅 Sort: Year (Newest)</option>
+            <option value="value">💰 Sort: Value (Highest)</option>
+            <option value="recent">🕐 Sort: Recently Added</option>
+          </select>
           <select onChange={e => setFilter({ ...filter, type: e.target.value })}>
             <option>All Types</option>
             <option>Defense Acquisition</option>
