@@ -2,25 +2,126 @@
 import { NextRequest, NextResponse } from 'next/server';
 import clientPromise from '@/lib/mongodb';
 
-// Smart relevance filter — only injects deals related to the question
-function getRelevantDeals(deals: any[], question: string): any[] {
+// Lightweight type so TS can help us keep things consistent
+interface Deal {
+  title: string;
+  country: string;
+  value?: string | number;
+  status: string;
+  type: string;
+  impact?: string;
+  description?: string;
+  strategicIntent?: string;
+  whyIndiaNeedsThis?: string;
+  keyItems?: string[];
+  date?: string | Date;
+  // Allow extra fields from Mongo without breaking type-checking
+  [key: string]: any;
+}
+
+function extractYear(date: Deal['date']): number | null {
+  if (!date) return null;
+  const str = date.toString();
+  const match = str.match(/\b(19|20)\d{2}\b/);
+  return match ? Number(match[0]) : null;
+}
+
+// Smarter relevance filter — mixes keyword hits with impact + recency
+function getRelevantDeals(deals: Deal[], question: string): Deal[] {
   const q = question.toLowerCase();
   const words = q.split(/\s+/).filter(w => w.length > 3);
 
   const scored = deals.map(deal => {
     let score = 0;
-    const haystack = `${deal.title} ${deal.country} ${deal.type} ${deal.description}`.toLowerCase();
+
+    const haystack = [
+      deal.title,
+      deal.country,
+      deal.type,
+      deal.description,
+      deal.strategicIntent,
+      deal.whyIndiaNeedsThis,
+      ...(deal.keyItems || []),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
 
     for (const word of words) {
       if (haystack.includes(word)) score += 3;
     }
 
     // Type boosting
-    if ((q.includes('defence') || q.includes('defense') || q.includes('military') || q.includes('jet') || q.includes('fighter') || q.includes('missile') || q.includes('submarine') || q.includes('helicopter') || q.includes('drone') || q.includes('tank') || q.includes('weapon') || q.includes('gun') || q.includes('rifle')) && deal.type === 'Defense Acquisition') score += 2;
-    if ((q.includes('trade') || q.includes('fta') || q.includes('tariff') || q.includes('export') || q.includes('import') || q.includes('cepa')) && deal.type === 'Trade') score += 2;
-    if ((q.includes('nuclear') || q.includes('reactor') || q.includes('uranium') || q.includes('energy') || q.includes('power plant')) && deal.type === 'Energy') score += 2;
-    if ((q.includes('tech') || q.includes('semiconductor') || q.includes('engine') || q.includes('software')) && deal.type === 'Technology') score += 2;
-    if ((q.includes('diplomatic') || q.includes('partnership') || q.includes('treaty') || q.includes('alliance')) && deal.type === 'Diplomatic') score += 2;
+    if (
+      (q.includes('defence') ||
+        q.includes('defense') ||
+        q.includes('military') ||
+        q.includes('jet') ||
+        q.includes('fighter') ||
+        q.includes('missile') ||
+        q.includes('submarine') ||
+        q.includes('helicopter') ||
+        q.includes('drone') ||
+        q.includes('tank') ||
+        q.includes('weapon') ||
+        q.includes('gun') ||
+        q.includes('rifle')) &&
+      deal.type === 'Defense Acquisition'
+    )
+      score += 2;
+
+    if (
+      (q.includes('trade') ||
+        q.includes('fta') ||
+        q.includes('tariff') ||
+        q.includes('export') ||
+        q.includes('import') ||
+        q.includes('cepa')) &&
+      deal.type === 'Trade'
+    )
+      score += 2;
+
+    if (
+      (q.includes('nuclear') ||
+        q.includes('reactor') ||
+        q.includes('uranium') ||
+        q.includes('energy') ||
+        q.includes('power plant')) &&
+      deal.type === 'Energy'
+    )
+      score += 2;
+
+    if (
+      (q.includes('tech') ||
+        q.includes('semiconductor') ||
+        q.includes('chip') ||
+        q.includes('engine') ||
+        q.includes('software') ||
+        q.includes('ai')) &&
+      deal.type === 'Technology'
+    )
+      score += 2;
+
+    if (
+      (q.includes('diplomatic') ||
+        q.includes('partnership') ||
+        q.includes('treaty') ||
+        q.includes('alliance') ||
+        q.includes('strategic')) &&
+      deal.type === 'Diplomatic'
+    )
+      score += 2;
+
+    // Impact weighting (prefer high-impact deals when relevance is similar)
+    if (deal.impact === 'High Impact') score += 1.5;
+    else if (deal.impact === 'Medium Impact') score += 0.75;
+
+    // Recency boost: more weight to recent deals for contemporary questions
+    const year = extractYear(deal.date);
+    if (year) {
+      if (year >= 2015) score += 1.5;
+      else if (year >= 2000) score += 0.75;
+    }
 
     return { deal, score };
   });
@@ -33,7 +134,14 @@ function getRelevantDeals(deals: any[], question: string): any[] {
 
   // Fallback: return 15 most recent high-impact deals
   if (matched.length === 0) {
-    return deals.filter(d => d.impact === 'High Impact').slice(0, 15);
+    return deals
+      .filter(d => d.impact === 'High Impact')
+      .sort((a, b) => {
+        const yearA = extractYear(a.date) || 0;
+        const yearB = extractYear(b.date) || 0;
+        return yearB - yearA;
+      })
+      .slice(0, 15);
   }
 
   return matched;
@@ -44,6 +152,7 @@ export async function POST(req: NextRequest) {
     const { messages } = await req.json();
 
     const apiKey = process.env.GROQ_API_KEY;
+    const model = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
     if (!apiKey) {
       return NextResponse.json({ error: 'GROQ_API_KEY not set' }, { status: 500 });
     }
@@ -52,7 +161,7 @@ export async function POST(req: NextRequest) {
     const client = await clientPromise;
     const db = client.db('finbank');
     const allDeals = await db
-      .collection('deals')
+      .collection<Deal>('deals')
       .find({ reviewStatus: 'approved' })
       .toArray();
 
@@ -67,8 +176,16 @@ export async function POST(req: NextRequest) {
     // Compact format — ~15 tokens per deal instead of ~50
     const dealsContext = relevantDeals
       .map(d => {
-        const year = d.date?.toString().match(/\b(19|20)\d{2}\b/)?.[0] || d.date || '?';
-        const val = d.value && d.value !== '0' ? `$${d.value}B` : 'N/A';
+        const year =
+          d.date?.toString().match(/\b(19|20)\d{2}\b/)?.[0] || d.date || '?';
+
+        let val = 'N/A';
+        if (d.value && d.value !== '0') {
+          const raw = d.value.toString();
+          // Avoid "$2.9BB" when the seed already includes a "B"
+          val = raw.endsWith('B') ? `$${raw}` : `$${raw}B`;
+        }
+
         return `${d.title}|${d.country}|${val}|${d.status}|${d.type}|${year}`;
       })
       .join('\n');
@@ -208,7 +325,7 @@ RULES:
         'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
+        model,
         messages: [
           { role: 'system', content: systemPrompt },
           ...messages,
