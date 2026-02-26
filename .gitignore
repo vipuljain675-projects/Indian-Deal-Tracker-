@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+devops-go/watchdog/tf-render/
+devops-go/watchdog/tf-vercel/
+devops-go/watchdog/tf-railway/
+devops-go/deals-infra/tf-*/
+**/*.tfstate
+**/*.tfstate.backup
+**/.terraform/
