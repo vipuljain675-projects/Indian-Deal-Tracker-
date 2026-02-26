@@ -1,26 +1,19 @@
 // deals-watchdog/main.go
 //
-// MULTI-CLOUD WATCHDOG
-// ────────────────────
-// Watches your Vercel deployment every 60 seconds.
-// If Vercel goes down → automatically deploys backup to Railway via Terraform.
-// When Vercel recovers → backup goes on standby again.
+// MULTI-CLOUD DEPLOY TOOL
+// ───────────────────────
+// Deploy your app to ANY cloud with a single command.
+// Your choice, any time — no waiting for failures.
 //
-// Run:
-//   go run main.go watchdog    ← runs forever, full auto-failover
-//   go run main.go status      ← current state of both clouds
-//   go run main.go deploy-backup  ← manually force backup deployment
-//   go run main.go teardown-backup ← manually remove Railway backup
-//
-// Setup:
-//   export VERCEL_URL="https://indian-deal-tracker.vercel.app"
-//   export RAILWAY_API_TOKEN="your_railway_token"
-//   export RAILWAY_PROJECT_ID="your_railway_project_id"
-//   export MONGODB_URI="mongodb+srv://..."
-//   export NEWS_API_KEY="..."
-//   export GROQ_API_KEY="..."
-//   export CRON_SECRET="..."
-//   export GITHUB_REPO="vipuljain675-projects/Indian-Deal-Tracker-"
+// Commands:
+//   go run main.go deploy vercel     → deploy to Vercel
+//   go run main.go deploy railway    → deploy to Railway
+//   go run main.go deploy render     → deploy to Render
+//   go run main.go status            → check all clouds
+//   go run main.go destroy railway   → remove Railway deployment
+//   go run main.go destroy vercel    → remove Vercel deployment
+//   go run main.go watchdog          → auto-failover mode (original)
+//   go run main.go help              → show all commands
 
 package main
 
@@ -38,49 +31,27 @@ import (
 )
 
 // ── Colours ──
+func green(s string) string   { return "\033[32m" + s + "\033[0m" }
+func red(s string) string     { return "\033[31m" + s + "\033[0m" }
+func yellow(s string) string  { return "\033[33m" + s + "\033[0m" }
+func bold(s string) string    { return "\033[1m" + s + "\033[0m" }
+func cyan(s string) string    { return "\033[36m" + s + "\033[0m" }
+func grey(s string) string    { return "\033[90m" + s + "\033[0m" }
 
-func green(s string) string  { return "\033[32m" + s + "\033[0m" }
-func red(s string) string    { return "\033[31m" + s + "\033[0m" }
-func yellow(s string) string { return "\033[33m" + s + "\033[0m" }
-func bold(s string) string   { return "\033[1m" + s + "\033[0m" }
-func cyan(s string) string   { return "\033[36m" + s + "\033[0m" }
-func grey(s string) string   { return "\033[90m" + s + "\033[0m" }
-func magenta(s string) string { return "\033[35m" + s + "\033[0m" }
-
-// ── State: tracks current situation ──
-
-type CloudState int
-
-const (
-	StateUnknown  CloudState = iota
-	StateHealthy             // Vercel is UP, Railway on standby
-	StateFailover            // Vercel is DOWN, Railway is serving
-	StateRecovery            // Vercel came back, tearing down Railway
-)
-
-func (s CloudState) String() string {
-	switch s {
-	case StateHealthy:
-		return green("HEALTHY")
-	case StateFailover:
-		return red("FAILOVER")
-	case StateRecovery:
-		return yellow("RECOVERING")
-	default:
-		return grey("UNKNOWN")
-	}
-}
-
-// AppConfig — everything needed to deploy
+// ── Config ──
 type AppConfig struct {
-	VercelURL       string
-	RailwayToken    string
-	RailwayProjectID string
-	GitRepo         string
-	EnvVars         map[string]string
-}
+	AppName    string
+	Framework  string
+	GitRepo    string
+	EnvVars    map[string]string
 
-// ── Load config from env vars + .env.local ──
+	// Cloud credentials
+	VercelToken     string
+	VercelProjectID string
+	VercelOrgID     string
+	RailwayToken    string
+	RenderToken     string
+}
 
 func readEnvFile(path string) {
 	f, err := os.Open(path)
@@ -88,7 +59,6 @@ func readEnvFile(path string) {
 		return
 	}
 	defer f.Close()
-
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -108,7 +78,6 @@ func readEnvFile(path string) {
 }
 
 func loadConfig() *AppConfig {
-	// Auto-load .env.local
 	for _, path := range []string{".env.local", "../../.env.local", "../../../.env.local"} {
 		if _, err := os.Stat(path); err == nil {
 			readEnvFile(path)
@@ -116,51 +85,35 @@ func loadConfig() *AppConfig {
 		}
 	}
 
-	vercelURL := os.Getenv("VERCEL_URL")
-	if vercelURL == "" {
-		vercelURL = "https://indian-deal-tracker.vercel.app"
+	gitRepo := os.Getenv("GITHUB_REPO")
+	if gitRepo == "" {
+		gitRepo = "vipuljain675-projects/Indian-Deal-Tracker-"
 	}
 
 	return &AppConfig{
-		VercelURL:        vercelURL,
-		RailwayToken:     os.Getenv("RAILWAY_API_TOKEN"),
-		RailwayProjectID: os.Getenv("RAILWAY_PROJECT_ID"),
-		GitRepo:          os.Getenv("GITHUB_REPO"),
+		AppName:   "india-deals-tracker",
+		Framework: "nextjs",
+		GitRepo:   gitRepo,
 		EnvVars: map[string]string{
 			"MONGODB_URI":  os.Getenv("MONGODB_URI"),
 			"NEWS_API_KEY": os.Getenv("NEWS_API_KEY"),
 			"GROQ_API_KEY": os.Getenv("GROQ_API_KEY"),
 			"CRON_SECRET":  os.Getenv("CRON_SECRET"),
 		},
+		VercelToken:     os.Getenv("VERCEL_API_TOKEN"),
+		VercelProjectID: os.Getenv("VERCEL_PROJECT_ID"),
+		VercelOrgID:     os.Getenv("VERCEL_ORG_ID"),
+		RailwayToken:    os.Getenv("RAILWAY_API_TOKEN"),
+		RenderToken:     os.Getenv("RENDER_API_TOKEN"),
 	}
 }
 
-// ── Health check ──
-
-type HealthResp struct {
-	Status        string `json:"status"`
-	ApprovedDeals int    `json:"approvedDeals"`
-}
-
-func checkVercel(url string) (bool, int64, int) {
-	start := time.Now()
-	client := &http.Client{Timeout: 10 * time.Second}
-
-	healthURL := strings.TrimRight(url, "/") + "/api/health"
-	resp, err := client.Get(healthURL)
-	elapsed := time.Since(start).Milliseconds()
-
-	if err != nil {
-		return false, elapsed, 0
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	var h HealthResp
-	json.Unmarshal(body, &h)
-
-	up := resp.StatusCode == 200 && h.Status == "healthy"
-	return up, elapsed, h.ApprovedDeals
+func escapeTF(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, `$`, `\$`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	return s
 }
 
 // ── Terraform helpers ──
@@ -189,19 +142,79 @@ func runTFCapture(args []string, dir string) (string, error) {
 	return out.String(), err
 }
 
-// ── Generate Railway Terraform config ──
-// Railway provider lets you deploy apps just like Vercel
-// Same app, same MongoDB — just different hosting
+// ── Terraform config generators ──
+// Each cloud gets its own generator function
+// Same app, same DB — just different provider block
+
+func generateVercelTF(cfg *AppConfig) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf(`# AUTO-GENERATED — Vercel Deployment
+# Generated: %s
+# App: %s
+
+terraform {
+  required_providers {
+    vercel = {
+      source  = "vercel/vercel"
+      version = "~> 1.0"
+    }
+  }
+  backend "local" {
+    path = "vercel.tfstate"
+  }
+}
+
+provider "vercel" {}
+
+resource "vercel_project" "app" {
+  name      = "%s"
+  team_id   = "%s"
+  framework = "%s"
+
+  git_repository = {
+    type              = "github"
+    repo              = "%s"
+    production_branch = "main"
+  }
+
+  build_command    = "npm run build"
+  output_directory = ".next"
+  install_command  = "npm install"
+
+  # Mumbai region — closest to India
+  serverless_function_region = "bom1"
+}
+
+`, time.Now().Format("2006-01-02 15:04:05"),
+		cfg.AppName, cfg.AppName, cfg.VercelOrgID,
+		cfg.Framework, cfg.GitRepo))
+
+	// Env vars
+	for key, value := range cfg.EnvVars {
+		sb.WriteString(fmt.Sprintf(`resource "vercel_env_var" "%s" {
+  project_id = vercel_project.app.id
+  team_id    = "%s"
+  key        = "%s"
+  value      = "%s"
+  target     = ["production", "preview", "development"]
+  sensitive  = true
+}
+
+`, strings.ToLower(key), cfg.VercelOrgID, key, escapeTF(value)))
+	}
+
+	sb.WriteString(`output "url" {
+  value = "https://${vercel_project.app.name}.vercel.app"
+}
+`)
+	return sb.String()
+}
 
 func generateRailwayTF(cfg *AppConfig) string {
 	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf(`# ============================================================
-# RAILWAY BACKUP DEPLOYMENT
-# Auto-generated by deals-watchdog
+	sb.WriteString(fmt.Sprintf(`# AUTO-GENERATED — Railway Deployment
 # Generated: %s
-# This is the BACKUP — only serves traffic when Vercel is DOWN
-# ============================================================
+# App: %s
 
 terraform {
   required_providers {
@@ -219,17 +232,13 @@ provider "railway" {
   token = "%s"
 }
 
-# ── Railway Project ──
-# This is your backup deployment on Railway
-resource "railway_project" "india_deals_backup" {
-  name = "india-deals-tracker-backup"
+resource "railway_project" "app" {
+  name = "%s"
 }
 
-# ── Railway Service ──
-# Connects your GitHub repo to Railway
-resource "railway_service" "app" {
-  name       = "india-deals-tracker"
-  project_id = railway_project.india_deals_backup.id
+resource "railway_service" "web" {
+  name       = "%s"
+  project_id = railway_project.app.id
 
   source = {
     repo   = "%s"
@@ -237,385 +246,409 @@ resource "railway_service" "app" {
   }
 }
 
-`, time.Now().Format("2006-01-02 15:04:05"), cfg.RailwayToken, cfg.GitRepo))
-
-	// Environment variables — same as Vercel, same MongoDB
-	// This is key — both clouds share ONE database
-	sb.WriteString("# ── Environment Variables ──\n")
-	sb.WriteString("# SAME MongoDB URI as Vercel — shared database\n")
-	sb.WriteString("# Both clouds read/write the same data\n\n")
+`, time.Now().Format("2006-01-02 15:04:05"),
+		cfg.AppName, cfg.RailwayToken,
+		cfg.AppName, cfg.AppName, cfg.GitRepo))
 
 	for key, value := range cfg.EnvVars {
-		resourceName := strings.ToLower(key)
 		sb.WriteString(fmt.Sprintf(`resource "railway_variable" "%s" {
-  project_id  = railway_project.india_deals_backup.id
-  service_id  = railway_service.app.id
+  project_id  = railway_project.app.id
+  service_id  = railway_service.web.id
   environment = "production"
   name        = "%s"
   value       = "%s"
 }
 
-`, resourceName, key, escapeTF(value)))
+`, strings.ToLower(key), key, escapeTF(value)))
 	}
 
-	// Output the Railway URL after deployment
-	sb.WriteString(`# ── Output ──
-output "backup_url" {
-  description = "Railway backup URL — share this when Vercel is down"
-  value       = "https://${railway_service.app.name}.up.railway.app"
-}
-
-output "status" {
-  value = "BACKUP ACTIVE — Railway deployment running"
+	sb.WriteString(`output "url" {
+  value = "https://${railway_service.web.name}.up.railway.app"
 }
 `)
-
 	return sb.String()
 }
 
-func escapeTF(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, `$`, `\$`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	return s
+func generateRenderTF(cfg *AppConfig) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf(`# AUTO-GENERATED — Render Deployment
+# Generated: %s
+# App: %s
+
+terraform {
+  required_providers {
+    render = {
+      source  = "render-oss/render"
+      version = "~> 1.8"
+    }
+  }
+  backend "local" {
+    path = "render.tfstate"
+  }
 }
 
-// ── Deploy backup to Railway ──
+provider "render" {
+  api_key  = "%s"
+  owner_id = "%s"
+}
 
-func deployBackup(cfg *AppConfig) (string, error) {
-	tfDir := "railway-tf"
-	os.MkdirAll(tfDir, 0755)
+resource "render_web_service" "app" {
+  name   = "%s"
+  region = "singapore"
+  plan   = "free"
 
-	// Write Railway terraform config
-	tfContent := generateRailwayTF(cfg)
-	if err := os.WriteFile(tfDir+"/main.tf", []byte(tfContent), 0644); err != nil {
-		return "", fmt.Errorf("cannot write main.tf: %w", err)
+  runtime_source = {
+    native_runtime = {
+      auto_deploy_trigger = "commit"
+      branch              = "main"
+      build_command       = "npm install && npm run build"
+      repo_url            = "https://github.com/%s"
+      runtime             = "node"
+    }
+  }
+
+  start_command = "npm start"
+
+  env_vars = {
+`, time.Now().Format("2006-01-02 15:04:05"),
+		cfg.AppName, cfg.RenderToken,
+		os.Getenv("RENDER_OWNER_ID"),
+		cfg.AppName, cfg.GitRepo))
+
+	for key, value := range cfg.EnvVars {
+		sb.WriteString(fmt.Sprintf("    %s = { value = \"%s\" }\n", key, escapeTF(value)))
 	}
 
-	fmt.Println(grey("  → Running terraform init..."))
-	if err := runTF([]string{"init", "-upgrade", "-no-color"}, tfDir); err != nil {
-		return "", fmt.Errorf("terraform init failed: %w", err)
+	sb.WriteString(`  }
+}
+
+output "url" {
+  value = render_web_service.app.url
+}
+`)
+	return sb.String()
+}
+
+// ── Deploy to a specific cloud ──
+
+func deploy(cloud string, cfg *AppConfig) {
+	// Map cloud name → tf directory + generator function
+	type CloudInfo struct {
+		dir      string
+		generate func() string
+		token    string
+		tokenVar string
 	}
 
-	fmt.Println(grey("  → Running terraform apply..."))
-	if err := runTF([]string{"apply", "-auto-approve", "-no-color"}, tfDir); err != nil {
-		return "", fmt.Errorf("terraform apply failed: %w", err)
+	clouds := map[string]CloudInfo{
+		"vercel": {
+			dir:      "tf-vercel",
+			generate: func() string { return generateVercelTF(cfg) },
+			token:    cfg.VercelToken,
+			tokenVar: "VERCEL_API_TOKEN",
+		},
+		"railway": {
+			dir:      "tf-railway",
+			generate: func() string { return generateRailwayTF(cfg) },
+			token:    cfg.RailwayToken,
+			tokenVar: "RAILWAY_API_TOKEN",
+		},
+		"render": {
+			dir:      "tf-render",
+			generate: func() string { return generateRenderTF(cfg) },
+			token:    cfg.RenderToken,
+			tokenVar: "RENDER_API_TOKEN",
+		},
 	}
 
-	// Get the Railway URL from terraform output
-	output, _ := runTFCapture([]string{"output", "-raw", "backup_url"}, tfDir)
-	backupURL := strings.TrimSpace(output)
-	if backupURL == "" {
-		backupURL = "https://india-deals-tracker-backup.up.railway.app"
+	info, ok := clouds[cloud]
+	if !ok {
+		fmt.Printf("\n%s '%s'\n", red("❌ Unknown cloud:"), cloud)
+		fmt.Printf("Available clouds: %s\n", cyan("vercel  railway  render"))
+		return
 	}
 
-	return backupURL, nil
-}
-
-// teardown Railway backup
-func teardownBackup() error {
-	tfDir := "railway-tf"
-	if _, err := os.Stat(tfDir); os.IsNotExist(err) {
-		return nil // nothing to teardown
+	// Check token exists
+	if info.token == "" {
+		fmt.Printf("\n%s\n", red("❌ Missing token for "+cloud+"!"))
+		fmt.Printf("   Set: %s\n", yellow("export "+info.tokenVar+"='your_token'"))
+		switch cloud {
+		case "vercel":
+			fmt.Println(grey("   Get it: vercel.com → Settings → Tokens → Create"))
+		case "railway":
+			fmt.Println(grey("   Get it: railway.app → Account Settings → API Tokens"))
+		case "render":
+			fmt.Println(grey("   Get it: render.com → Account Settings → API Keys"))
+		}
+		return
 	}
 
-	fmt.Println(grey("  → Running terraform destroy..."))
-	return runTF([]string{"destroy", "-auto-approve", "-no-color"}, tfDir)
+	fmt.Printf("\n%s\n", bold("🚀 Deploying to "+strings.ToUpper(cloud)+"..."))
+	fmt.Println(strings.Repeat("─", 50))
+	fmt.Printf("  App    : %s\n", cfg.AppName)
+	fmt.Printf("  Cloud  : %s\n", cyan(cloud))
+	fmt.Printf("  Repo   : %s\n", cfg.GitRepo)
+	fmt.Printf("  EnvVars: %d variables\n", len(cfg.EnvVars))
+	fmt.Println(strings.Repeat("─", 50))
+
+	// Create tf directory
+	os.MkdirAll(info.dir, 0755)
+
+	// Step 1: Generate .tf file
+	fmt.Printf("\n📝 Step 1/3 — Generating %s.tf...\n", cloud)
+	tfContent := info.generate()
+	tfFile := info.dir + "/main.tf"
+	if err := os.WriteFile(tfFile, []byte(tfContent), 0644); err != nil {
+		fmt.Printf("%s %v\n", red("❌"), err)
+		return
+	}
+	fmt.Printf("   %s Written %s\n", green("✓"), grey(tfFile))
+
+	// Step 2: terraform init
+	fmt.Printf("\n📦 Step 2/3 — terraform init...\n")
+	fmt.Println(strings.Repeat("─", 50))
+	if err := runTF([]string{"init", "-upgrade"}, info.dir); err != nil {
+		fmt.Printf("\n%s terraform init failed\n", red("❌"))
+		return
+	}
+
+	// Step 3: terraform apply
+	fmt.Println(strings.Repeat("─", 50))
+	fmt.Printf("\n⚡ Step 3/3 — terraform apply...\n")
+	fmt.Println(grey("   Review the plan then type 'yes' to confirm."))
+	fmt.Println(strings.Repeat("─", 50))
+	if err := runTF([]string{"apply"}, info.dir); err != nil {
+		fmt.Printf("\n%s terraform apply failed\n", red("❌"))
+		return
+	}
+
+	// Get output URL
+	url, _ := runTFCapture([]string{"output", "-raw", "url"}, info.dir)
+	url = strings.TrimSpace(url)
+
+	fmt.Printf("\n%s\n", green("✅ Deployed to "+strings.ToUpper(cloud)+"!"))
+	if url != "" {
+		fmt.Printf("   🔗 URL: %s\n", bold(cyan(url)))
+	}
+	fmt.Println()
 }
 
-// isBackupDeployed checks if Railway tf state exists
-func isBackupDeployed() bool {
-	_, err := os.Stat("railway-tf/railway.tfstate")
-	return err == nil
+// ── Destroy a specific cloud deployment ──
+
+func destroy(cloud string) {
+	dirs := map[string]string{
+		"vercel":  "tf-vercel",
+		"railway": "tf-railway",
+		"render":  "tf-render",
+	}
+
+	dir, ok := dirs[cloud]
+	if !ok {
+		fmt.Printf("%s '%s'\n", red("❌ Unknown cloud:"), cloud)
+		return
+	}
+
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		fmt.Printf("\n%s No %s deployment found. Nothing to destroy.\n",
+			yellow("⚠️"), cloud)
+		return
+	}
+
+	fmt.Printf("\n%s\n", bold("💥 Destroying "+strings.ToUpper(cloud)+" deployment..."))
+	fmt.Printf("%s This will take the app OFFLINE on %s!\n", red("⚠️"), cloud)
+	fmt.Print("Type 'yes' to confirm: ")
+
+	var confirm string
+	fmt.Scanln(&confirm)
+	if confirm != "yes" {
+		fmt.Println(green("Cancelled."))
+		return
+	}
+
+	runTF([]string{"destroy", "-auto-approve"}, dir)
+	fmt.Printf("\n%s %s deployment removed.\n", green("✅"), strings.ToUpper(cloud))
 }
 
-// ── Log helpers ──
+// ── Status: check all clouds ──
 
-func logLine(icon, cloud, message string) {
-	ts := time.Now().Format("2006-01-02 15:04:05")
-	fmt.Printf("[%s] %s %s %s\n", grey(ts), icon, cyan(cloud), message)
+type HealthResp struct {
+	Status        string `json:"status"`
+	ApprovedDeals int    `json:"approvedDeals"`
 }
 
-func logAlert(message string) {
-	fmt.Printf("\n%s\n", strings.Repeat("!", 60))
-	fmt.Printf("  🚨 %s\n", red(bold(message)))
-	fmt.Printf("%s\n\n", strings.Repeat("!", 60))
+func checkURL(url string) (bool, int64, int) {
+	start := time.Now()
+	client := &http.Client{Timeout: 10 * time.Second}
+	healthURL := strings.TrimRight(url, "/") + "/api/health"
+	resp, err := client.Get(healthURL)
+	elapsed := time.Since(start).Milliseconds()
+	if err != nil {
+		return false, elapsed, 0
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var h HealthResp
+	json.Unmarshal(body, &h)
+	return resp.StatusCode == 200 && h.Status == "healthy", elapsed, h.ApprovedDeals
 }
 
-func logSuccess(message string) {
-	fmt.Printf("\n%s\n", strings.Repeat("=", 60))
-	fmt.Printf("  ✅ %s\n", green(bold(message)))
-	fmt.Printf("%s\n\n", strings.Repeat("=", 60))
+func cmdStatus(cfg *AppConfig) {
+	fmt.Println(bold("\n📊 Multi-Cloud Status"))
+	fmt.Println(strings.Repeat("─", 55))
+
+	type CloudStatus struct {
+		name    string
+		url     string
+		stateFile string
+	}
+
+	clouds := []CloudStatus{
+		{"Vercel  (primary)", "https://indian-deal-tracker.vercel.app", "tf-vercel/vercel.tfstate"},
+		{"Railway (backup)", "", "tf-railway/railway.tfstate"},
+		{"Render  (backup)", "", "tf-render/render.tfstate"},
+	}
+
+	for _, c := range clouds {
+		deployed := false
+		if _, err := os.Stat(c.stateFile); err == nil {
+			deployed = true
+		}
+
+		if !deployed && c.name != "Vercel  (primary)" {
+			fmt.Printf("  %-22s %s\n", bold(c.name), grey("💤 not deployed"))
+			continue
+		}
+
+		url := c.url
+		if url == "" && deployed {
+			// Try to get URL from terraform output
+			dir := strings.Split(c.stateFile, "/")[0]
+			out, _ := runTFCapture([]string{"output", "-raw", "url"}, dir)
+			url = strings.TrimSpace(out)
+		}
+
+		if url == "" {
+			fmt.Printf("  %-22s %s\n", bold(c.name), yellow("⚠️  deployed but URL unknown"))
+			continue
+		}
+
+		fmt.Printf("  %-22s ", bold(c.name))
+		up, ms, deals := checkURL(url)
+		if up {
+			fmt.Printf("%s (%dms, %d deals)\n", green("✅ UP"), ms, deals)
+			fmt.Printf("  %-22s %s\n", "", grey(url))
+		} else {
+			fmt.Printf("%s\n", red("❌ DOWN"))
+			fmt.Printf("  %-22s %s\n", "", grey(url))
+		}
+	}
+	fmt.Println(strings.Repeat("─", 55))
+	fmt.Println()
 }
 
-// ── Main watchdog loop ──
+// ── Watchdog: auto-failover mode ──
 
 func cmdWatchdog(cfg *AppConfig) {
-	fmt.Println(bold("\n🐕 India Deals Tracker — Multi-Cloud Watchdog"))
-	fmt.Println(strings.Repeat("─", 60))
-	fmt.Printf("  Primary   : %s\n", cyan(cfg.VercelURL))
-	fmt.Printf("  Backup    : %s\n", cyan("Railway (deployed automatically on failure)"))
-	fmt.Printf("  Check     : every 60 seconds\n")
-	fmt.Printf("  Trigger   : 3 consecutive failures → deploy backup\n")
-	fmt.Println(strings.Repeat("─", 60))
+	fmt.Println(bold("\n🐕 Watchdog Mode — Auto Failover"))
+	fmt.Println(strings.Repeat("─", 50))
+	fmt.Printf("  Primary : %s\n", cyan("Vercel"))
+	fmt.Printf("  Backup  : %s\n", cyan("Railway (auto-deployed on failure)"))
+	fmt.Printf("  Interval: every 60 seconds\n")
+	fmt.Printf("  Trigger : 3 consecutive failures\n")
+	fmt.Println(strings.Repeat("─", 50))
 	fmt.Println(grey("\nPress Ctrl+C to stop\n"))
 
-	checkInterval := 60 * time.Second
-	failThreshold := 3 // failures before deploying backup
-	consecutiveFails := 0
-	consecutiveSuccesses := 0
-	currentState := StateUnknown
+	vercelURL := "https://indian-deal-tracker.vercel.app"
+	fails := 0
+	successes := 0
+	inFailover := false
 	backupURL := ""
 	checkCount := 0
 
 	for {
 		checkCount++
-		up, ms, deals := checkVercel(cfg.VercelURL)
+		up, ms, deals := checkURL(vercelURL)
+		ts := time.Now().Format("15:04:05")
 
-		switch {
+		if up {
+			fails = 0
+			successes++
+			speed := green("fast")
+			if ms > 1000 { speed = yellow("slow") }
+			if ms > 3000 { speed = red("very slow") }
+			fmt.Printf("[%s] ✅ Vercel UP | %s | %dms | %d deals | #%d\n",
+				grey(ts), speed, ms, deals, checkCount)
 
-		// ── VERCEL IS UP ──
-		case up:
-			consecutiveFails = 0
-			consecutiveSuccesses++
-
-			speedLabel := green("fast")
-			if ms > 1000 {
-				speedLabel = yellow("slow")
+			// Vercel recovered — teardown backup after 3 good checks
+			if inFailover && successes >= 3 {
+				fmt.Printf("\n%s Vercel recovered! Removing Railway backup...\n",
+					green("✅"))
+				runTF([]string{"destroy", "-auto-approve"}, "tf-railway")
+				inFailover = false
+				backupURL = ""
+				fmt.Println(green("✓ Back to normal. Vercel is primary.\n"))
 			}
-			if ms > 3000 {
-				speedLabel = red("very slow")
-			}
-
-			logLine("✅", "Vercel", fmt.Sprintf("%s | %dms | %d deals | check #%d",
-				speedLabel, ms, deals, checkCount))
-
-			// If we were in failover and Vercel has been up for 3 checks → recover
-			if currentState == StateFailover && consecutiveSuccesses >= 3 {
-				currentState = StateRecovery
-				logSuccess("Vercel has recovered! Tearing down Railway backup...")
-
-				fmt.Println(grey("  → Removing Railway backup deployment..."))
-				if err := teardownBackup(); err != nil {
-					fmt.Printf("  %s Could not teardown backup: %v\n", yellow("⚠️"), err)
-				} else {
-					fmt.Printf("  %s Railway backup removed. Vercel is primary again.\n", green("✓"))
-					backupURL = ""
-					currentState = StateHealthy
-				}
-			} else if currentState != StateFailover {
-				currentState = StateHealthy
-			}
-
-		// ── VERCEL IS DOWN ──
-		case !up:
-			consecutiveSuccesses = 0
-			consecutiveFails++
-
-			logLine("❌", "Vercel", fmt.Sprintf("DOWN | %dms | failure %d/%d",
-				ms, consecutiveFails, failThreshold))
-
-			// Not enough failures yet — warn but wait
-			if consecutiveFails < failThreshold {
-				fmt.Printf("  %s Vercel appears down. Waiting to confirm (%d/%d)...\n",
-					yellow("⚠️"), consecutiveFails, failThreshold)
-				fmt.Printf("  %s Will deploy Railway backup after %d more failure(s)\n",
-					grey("→"), failThreshold-consecutiveFails)
-			}
-
-			// Hit threshold AND backup not already deployed → DEPLOY BACKUP
-			if consecutiveFails >= failThreshold && currentState != StateFailover {
-				currentState = StateFailover
-
-				logAlert(fmt.Sprintf(
-					"VERCEL IS DOWN! %d consecutive failures detected!\nDeploying backup to Railway NOW...",
-					consecutiveFails,
-				))
-
-				if cfg.RailwayToken == "" {
-					fmt.Printf("  %s RAILWAY_API_TOKEN not set!\n", red("❌"))
-					fmt.Println(grey("  → Set it up: railway.app → account → API Tokens"))
-					fmt.Println(grey("  → export RAILWAY_API_TOKEN='your_token'"))
-					fmt.Println(grey("  → Then restart the watchdog"))
-				} else {
-					fmt.Println(cyan("  → Deploying to Railway via Terraform..."))
-					startTime := time.Now()
-
-					url, err := deployBackup(cfg)
-					elapsed := time.Since(startTime).Round(time.Second)
-
-					if err != nil {
-						fmt.Printf("  %s Railway deploy failed: %v\n", red("❌"), err)
-						fmt.Println(grey("  → Watchdog will retry on next check"))
-						currentState = StateUnknown // reset so we retry
-					} else {
-						backupURL = url
-						logSuccess(fmt.Sprintf(
-							"BACKUP IS LIVE! Deployed in %s\n  🔗 Share this URL: %s",
-							elapsed, backupURL,
-						))
-
-						fmt.Printf("  %s Your app is still accessible at:\n", green("✓"))
-						fmt.Printf("     %s\n\n", bold(cyan(backupURL)))
-						fmt.Println(grey("  → Watchdog will auto-remove Railway when Vercel recovers"))
-					}
-				}
-			}
-
-			// Already in failover — remind user of backup URL
-			if currentState == StateFailover && backupURL != "" {
-				fmt.Printf("  %s Backup still serving at: %s\n",
-					green("✓"), cyan(backupURL))
-			}
-		}
-
-		time.Sleep(checkInterval)
-	}
-}
-
-// ── Status command ──
-
-func cmdStatus(cfg *AppConfig) {
-	fmt.Println(bold("\n📊 Multi-Cloud Status"))
-	fmt.Println(strings.Repeat("─", 50))
-
-	// Check Vercel
-	fmt.Print("Checking Vercel... ")
-	up, ms, deals := checkVercel(cfg.VercelURL)
-	if up {
-		fmt.Printf("%s (%dms, %d deals)\n", green("✅ UP"), ms, deals)
-	} else {
-		fmt.Printf("%s\n", red("❌ DOWN"))
-	}
-	fmt.Printf("  URL: %s\n", grey(cfg.VercelURL))
-
-	// Check Railway backup
-	fmt.Print("\nRailway backup... ")
-	if isBackupDeployed() {
-		// Try to read backup URL from terraform output
-		output, err := runTFCapture([]string{"output", "-raw", "backup_url"}, "railway-tf")
-		if err == nil && strings.TrimSpace(output) != "" {
-			backupURL := strings.TrimSpace(output)
-			upBackup, msBackup, _ := checkVercel(backupURL)
-			if upBackup {
-				fmt.Printf("%s (%dms)\n", green("✅ ACTIVE"), msBackup)
-			} else {
-				fmt.Printf("%s\n", yellow("⚠️  DEPLOYED BUT NOT RESPONDING"))
-			}
-			fmt.Printf("  URL: %s\n", grey(backupURL))
 		} else {
-			fmt.Printf("%s\n", yellow("⚠️  State file exists but can't get URL"))
+			successes = 0
+			fails++
+			fmt.Printf("[%s] ❌ Vercel DOWN | %dms | failure %d/3\n",
+				grey(ts), ms, fails)
+
+			if fails >= 3 && !inFailover {
+				inFailover = true
+				fmt.Printf("\n%s\n", red("🚨 VERCEL DOWN! Deploying Railway backup..."))
+				deploy("railway", cfg)
+
+				out, _ := runTFCapture([]string{"output", "-raw", "url"}, "tf-railway")
+				backupURL = strings.TrimSpace(out)
+				if backupURL != "" {
+					fmt.Printf("\n%s Backup live: %s\n\n",
+						green("✅"), bold(cyan(backupURL)))
+				}
+			}
+
+			if inFailover && backupURL != "" {
+				fmt.Printf("   %s Backup serving: %s\n", green("✓"), cyan(backupURL))
+			}
 		}
-	} else {
-		fmt.Printf("%s\n", grey("💤 STANDBY (not deployed)"))
-		fmt.Printf("  %s\n", grey("Will deploy automatically if Vercel goes down"))
+
+		time.Sleep(60 * time.Second)
 	}
-
-	fmt.Println(strings.Repeat("─", 50))
-	if !up && isBackupDeployed() {
-		fmt.Printf("Current mode: %s\n", red("🚨 FAILOVER — Railway serving traffic"))
-	} else if up {
-		fmt.Printf("Current mode: %s\n", green("✅ NORMAL — Vercel serving traffic"))
-	} else {
-		fmt.Printf("Current mode: %s\n", yellow("⚠️  Vercel down, backup not deployed yet"))
-	}
-	fmt.Println()
-}
-
-// ── Manual deploy backup ──
-
-func cmdDeployBackup(cfg *AppConfig) {
-	fmt.Println(bold("\n🚀 Manually deploying backup to Railway..."))
-	fmt.Println(strings.Repeat("─", 50))
-
-	if cfg.RailwayToken == "" {
-		fmt.Println(red("❌ RAILWAY_API_TOKEN not set!"))
-		fmt.Println(grey("   railway.app → account settings → API Tokens → Create"))
-		fmt.Println(grey("   export RAILWAY_API_TOKEN='your_token'"))
-		return
-	}
-
-	url, err := deployBackup(cfg)
-	if err != nil {
-		fmt.Printf("%s %v\n", red("❌ Deploy failed:"), err)
-		return
-	}
-
-	fmt.Printf("\n%s\n", green("✅ Backup deployed successfully!"))
-	fmt.Printf("   URL: %s\n\n", bold(cyan(url)))
-}
-
-// ── Manual teardown ──
-
-func cmdTeardownBackup() {
-	fmt.Println(bold("\n🗑️  Tearing down Railway backup..."))
-	fmt.Println(strings.Repeat("─", 50))
-
-	if !isBackupDeployed() {
-		fmt.Println(yellow("⚠️  No backup deployment found. Nothing to teardown."))
-		return
-	}
-
-	if err := teardownBackup(); err != nil {
-		fmt.Printf("%s %v\n", red("❌ Teardown failed:"), err)
-		return
-	}
-
-	fmt.Println(green("✅ Railway backup removed. Vercel is sole deployment."))
 }
 
 func cmdHelp() {
-	fmt.Println(bold("\n🐕 India Deals Tracker — Multi-Cloud Watchdog"))
-	fmt.Println(grey("Auto-deploys Railway backup when Vercel goes down\n"))
+	fmt.Println(bold("\n🚀 India Deals Tracker — Multi-Cloud Deploy Tool"))
+	fmt.Println(grey("Deploy to any cloud with a single command\n"))
 
-	fmt.Println(bold("Commands:"))
-	cmds := [][]string{
-		{"watchdog", "Run forever — auto failover to Railway on Vercel failure"},
-		{"status", "Check current state of Vercel + Railway"},
-		{"deploy-backup", "Manually deploy Railway backup right now"},
-		{"teardown-backup", "Manually remove Railway backup"},
-		{"help", "Show this message"},
-	}
-	for _, c := range cmds {
-		fmt.Printf("  %-20s %s\n", cyan(c[0]), c[1])
-	}
+	fmt.Println(bold("Deploy:"))
+	fmt.Printf("  %s  Deploy to Vercel\n", cyan("go run main.go deploy vercel"))
+	fmt.Printf("  %s  Deploy to Railway\n", cyan("go run main.go deploy railway"))
+	fmt.Printf("  %s   Deploy to Render\n", cyan("go run main.go deploy render"))
 
-	fmt.Println(bold("\nHow it works:"))
-	fmt.Println(grey("  1. Checks Vercel every 60 seconds"))
-	fmt.Println(grey("  2. After 3 consecutive failures → deploys Railway backup via Terraform"))
-	fmt.Println(grey("  3. Prints Railway URL → you share it manually"))
-	fmt.Println(grey("  4. When Vercel recovers → automatically removes Railway backup"))
-	fmt.Println(grey("  5. Back to normal — Vercel is primary again"))
+	fmt.Println(bold("\nRemove:"))
+	fmt.Printf("  %s  Remove Vercel deployment\n", cyan("go run main.go destroy vercel"))
+	fmt.Printf("  %s  Remove Railway deployment\n", cyan("go run main.go destroy railway"))
 
-	fmt.Println(bold("\nSetup (Railway):"))
-	fmt.Println(grey("  1. railway.app → create account (free)"))
-	fmt.Println(grey("  2. Account Settings → API Tokens → Create Token"))
-	fmt.Println(grey("  3. export RAILWAY_API_TOKEN='your_token'"))
-	fmt.Println(grey("  4. go run main.go watchdog"))
+	fmt.Println(bold("\nMonitor:"))
+	fmt.Printf("  %s          Check all clouds\n", cyan("go run main.go status"))
+	fmt.Printf("  %s        Auto-failover mode\n", cyan("go run main.go watchdog"))
 
-	fmt.Println(bold("\nRequired env vars:"))
-	vars := [][]string{
-		{"VERCEL_URL", "https://indian-deal-tracker.vercel.app (default)"},
-		{"RAILWAY_API_TOKEN", "railway.app → account → API Tokens"},
-		{"MONGODB_URI", "auto-loaded from .env.local"},
-		{"NEWS_API_KEY", "auto-loaded from .env.local"},
-		{"GROQ_API_KEY", "auto-loaded from .env.local"},
-		{"CRON_SECRET", "auto-loaded from .env.local"},
-		{"GITHUB_REPO", "e.g. vipuljain675-projects/Indian-Deal-Tracker-"},
-	}
-	for _, v := range vars {
-		fmt.Printf("  %-22s %s\n", cyan(v[0]), grey(v[1]))
-	}
+	fmt.Println(bold("\nTokens needed per cloud:"))
+	fmt.Println(grey("  Vercel  → vercel.com → Settings → Tokens"))
+	fmt.Println(grey("           export VERCEL_API_TOKEN=..."))
+	fmt.Println(grey("           export VERCEL_PROJECT_ID=..."))
+	fmt.Println(grey("           export VERCEL_ORG_ID=..."))
+	fmt.Println(grey("  Railway → railway.app → Account → API Tokens"))
+	fmt.Println(grey("           export RAILWAY_API_TOKEN=..."))
+	fmt.Println(grey("  Render  → render.com → Account → API Keys"))
+	fmt.Println(grey("           export RENDER_API_TOKEN=..."))
 	fmt.Println()
 }
-
-// ── Main ──
 
 func main() {
 	if !checkTerraform() {
 		fmt.Println(red("\n❌ Terraform not installed!"))
-		fmt.Println(yellow("   Fix: brew uninstall terraform && brew install terraform"))
+		fmt.Println(yellow("   brew uninstall terraform && brew install terraform"))
 		os.Exit(1)
 	}
 
@@ -628,18 +661,31 @@ func main() {
 	}
 
 	switch args[0] {
-	case "watchdog":
-		cmdWatchdog(cfg)
+	case "deploy":
+		if len(args) < 2 {
+			fmt.Println(red("❌ Specify a cloud: deploy vercel | deploy railway | deploy render"))
+			return
+		}
+		deploy(args[1], cfg)
+
+	case "destroy":
+		if len(args) < 2 {
+			fmt.Println(red("❌ Specify a cloud: destroy vercel | destroy railway | destroy render"))
+			return
+		}
+		destroy(args[1])
+
 	case "status":
 		cmdStatus(cfg)
-	case "deploy-backup":
-		cmdDeployBackup(cfg)
-	case "teardown-backup":
-		cmdTeardownBackup()
+
+	case "watchdog":
+		cmdWatchdog(cfg)
+
 	case "help", "--help", "-h":
 		cmdHelp()
+
 	default:
-		fmt.Printf("\n%s '%s'\n", red("❌ Unknown command:"), args[0])
+		fmt.Printf("%s '%s'\n", red("❌ Unknown command:"), args[0])
 		cmdHelp()
 	}
 }
