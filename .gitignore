@@ -46,3 +46,12 @@ devops-go/deals-infra/tf-*/
 **/*.tfstate
 **/*.tfstate.backup
 **/.terraform/
+# Terraform - never commit these
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.backup
+**/*.tfstate.*.backup
+**/tf-render/
+**/tf-railway/
+**/tf-vercel/
+**/infrastructure.tf
