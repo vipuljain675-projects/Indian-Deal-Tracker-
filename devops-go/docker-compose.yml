@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  # Tool 1: Health Monitor
+  monitor:
+    build: ./monitor
+    container_name: deals-monitor
+    restart: always
+    environment:
+      - HEALTH_URL=https://indian-deal-tracker.vercel.app/api/health
+
+  # Tool 2: Deployment Notifier
+  notifier:
+    build: ./notifier
+    container_name: deals-notifier
+    restart: always
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_REPO=vipuljain675-projects/Indian-Deal-Tracker-
+
+  # Tool 5: Metrics Collector
+  metrics:
+    build: ./metrics
+    container_name: deals-metrics
+    restart: always
+    volumes:
+      - ./metrics:/app/data # Persists the metrics.csv on your real machine
+    environment:
+      - HEALTH_URL=https://indian-deal-tracker.vercel.app/api/health
+    command: ["./metrics", "collect"]
+
+  # Visualizer: Portainer Dashboard
+  visualizer:
+    image: portainer/portainer-ce:latest
+    container_name: deals-visualizer
+    restart: always
+    ports:
+      - "9444:9443" # Port mapping: [Host Port] : [Container Port]
+      - "9001:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+
+# Root-level volumes section
+volumes:
+  portainer_data:
