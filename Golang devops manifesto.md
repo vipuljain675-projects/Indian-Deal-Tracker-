@@ -554,5 +554,41 @@ GOOS=linux GOARCH=amd64 go build -o deals-monitor
 
 ---
 
+
+🏗️ The DevOps Fleet (Orchestration)
+🐋 Dockerization
+Each long-running tool now uses a Multi-Stage Dockerfile to keep the production image tiny and secure:
+
+Stage 1 (Builder): Compiles the Go code.
+
+Stage 2 (Runner): Executes the binary on a lightweight Alpine Linux base.
+
+🎼 Docker Compose
+Manage your entire monitoring suite with unified commands:
+
+Start Fleet: docker-compose up -d
+
+Rebuild & Start: docker-compose up -d --build
+
+Stop Fleet: docker-compose down
+
+
+
+Tool 8 — Visualizer (Portainer)
+Access: http://localhost:9001
+
+Username: admin
+
+Dashboard: Monitor real-time CPU/RAM usage and view live logs for the entire Go fleet without using the terminal.
+
+Action,Command
+Check Fleet Status,docker-compose ps
+View All Logs,docker-compose logs -f --tail 20
+Run CLI Stats,cd dbstats && go run main.go
+CLI Search,cd deals-cli && go run main.go search <keyword>
+Check Portainer,Open localhost:9001 in your browser
+
+
+
 *Built with Go 1.21 + Terraform 1.14 · India Deals Tracker DevOps Suite · February 2026*
 *7 tools · 2 clouds · 1 database · infinite reliability 🇮🇳*

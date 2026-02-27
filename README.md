@@ -288,6 +288,65 @@ GitHub → Settings → Branches → `main`:
 | Failover | Go Watchdog | Auto-deploy backup on failure | Free |
 | Branch Protection | GitHub | Block broken code | Free |
 
+
+
+🐋 India Deals Tracker — DevOps Docker Suite
+This document covers the containerization and orchestration of the India Deals Tracker Go toolset. By moving to Docker, we ensure 24/7 reliability, automated restarts, and centralized management.
+
+🏗️ Architecture Overview
+The suite is organized into a microservices-style architecture, where each Go tool runs in its own isolated environment.
+
+Multi-Stage Builds: Uses a golang:1.21-alpine builder and a microscopic alpine:latest runner to keep image sizes < 20MB.
+
+Orchestration: Managed via Docker Compose for one-command deployment.
+
+Persistence: Local CSV logs are preserved via Docker Volumes.
+
+🚀 Quick Start
+1. Prerequisites
+Docker Desktop installed and running.
+
+A .env file in the devops-go/ directory containing your GITHUB_TOKEN and HEALTH_URL.
+
+2. Launch the Fleet
+Run the following command in the devops-go/ folder:
+docker-compose up -d --build
+
+This command builds the images, creates the private network, and starts the following services in the background:
+
+1. deals-monitor: Health tracking service.
+
+2. deals-notifier: GitHub deployment watcher.
+
+3. deals-metrics: 5-minute performance collector.
+
+4. deals-visualizer: Portainer management dashboard.
+
+
+🖥️ Management Dashboard (Portainer)
+Instead of using the terminal, manage your tools via the web UI:
+
+URL: http://localhost:9001
+
+Username: admin
+
+Key Features:
+
+Live Logs: View real-time output for any Go tool.
+
+Stats: Monitor CPU and RAM usage (typically < 10MB per tool).
+
+One-Click Restart: Re-run services if you update your MongoDB or GitHub settings.
+
+
+🛠️ DevOps Maintenance Commands
+Action,Command
+Check service health,docker-compose ps
+View unified logs,docker-compose logs -f --tail 20
+Stop all services,docker-compose down
+Inspect metrics file,cat ./metrics/metrics.csv
+
+
 **Total DevOps cost: $0/month.**
 
 ---
