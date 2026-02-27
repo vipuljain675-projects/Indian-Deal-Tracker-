@@ -1,7 +1,4 @@
 // lib/dealExtractor.ts
-// Uses FREE Groq API (llama-3.3-70b) — get key at https://console.groq.com
-// Free tier: 14,400 requests/day, no credit card needed, very fast
-
 export interface ExtractedDeal {
   title: string;
   country: string;
@@ -22,36 +19,33 @@ export async function extractDealFromText(
 ): Promise<ExtractedDeal | null> {
   try {
     const apiKey = process.env.GROQ_API_KEY;
-    if (!apiKey) {
-      console.warn('GROQ_API_KEY not set');
-      return null;
-    }
+    if (!apiKey) { console.warn('GROQ_API_KEY not set'); return null; }
 
     const prompt = `You are an expert analyst of Indian foreign policy, defence, and trade deals.
 
-Read this news article and extract information about an India deal/agreement. Return ONLY valid JSON, no markdown, no explanation, no code fences.
+Read this news article and extract deal information. Be GENEROUS — if the article mentions ANY agreement, MoU, contract, purchase, trade deal, partnership, or cooperation between India and another country, extract it.
 
 Article:
 """
 ${articleText.slice(0, 3000)}
 """
 
-Return this exact JSON structure:
+Return ONLY valid JSON, no markdown, no explanation:
 {
-  "title": "Short official-style title of the deal (max 80 chars)",
-  "country": "Partner country name e.g. France, USA, European Union. Use India if internal.",
-  "value": "Deal value in billions USD as plain number string e.g. 5.4 or 0 if unknown",
+  "title": "Short official-style title (max 80 chars)",
+  "country": "Partner country name. Use 'Multiple' if several countries. Use 'India' if internal.",
+  "value": "Deal value in billions USD as plain number e.g. 5.4 — use 0 if not mentioned",
   "status": "One of: Proposed | Signed | In Progress | Ongoing | Completed",
   "type": "One of: Defense Acquisition | Trade | Technology | Energy | Diplomatic",
   "impact": "One of: High Impact | Medium Impact | Low Impact",
-  "description": "2-3 sentence factual summary",
-  "strategicIntent": "1-2 sentences on India strategic goal",
-  "whyIndiaNeedsThis": "1-2 sentences on specific Indian need",
+  "description": "2-3 sentence factual summary of the deal",
+  "strategicIntent": "1-2 sentences on India's strategic goal",
+  "whyIndiaNeedsThis": "1-2 sentences on the specific need this fulfills",
   "keyItems": ["item 1", "item 2", "item 3"],
   "date": "Month and year e.g. February 2026"
 }
 
-If this is NOT about an India deal or agreement, return: {"error": "not_a_deal"}`;
+ONLY return {"error": "not_a_deal"} if the article has absolutely nothing to do with India OR has no agreement/deal/contract of any kind.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -79,12 +73,13 @@ If this is NOT about an India deal or agreement, return: {"error": "not_a_deal"}
 
     const data = await response.json();
     const raw = data.choices?.[0]?.message?.content || '';
-
-    // Strip any accidental markdown code fences
     const cleaned = raw.replace(/```json|```/g, '').trim();
     const parsed = JSON.parse(cleaned);
 
     if (parsed.error === 'not_a_deal') return null;
+
+    // Validate required fields exist
+    if (!parsed.title || !parsed.country) return null;
 
     return parsed as ExtractedDeal;
   } catch (err) {
@@ -93,14 +88,13 @@ If this is NOT about an India deal or agreement, return: {"error": "not_a_deal"}
   }
 }
 
-// Fetch full article text from a URL
 export async function fetchArticleText(url: string): Promise<string> {
   try {
     const res = await fetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; DealTrackerBot/1.0)' },
+      signal: AbortSignal.timeout(5000), // 5 second timeout
     });
     const html = await res.text();
-
     return html
       .replace(/<script[\s\S]*?<\/script>/gi, '')
       .replace(/<style[\s\S]*?<\/style>/gi, '')
@@ -109,7 +103,6 @@ export async function fetchArticleText(url: string): Promise<string> {
       .trim()
       .slice(0, 4000);
   } catch (err) {
-    console.error('fetchArticleText error:', err);
-    return '';
+    return ''; // Silently fail — paywalled or blocked sites
   }
 }
