@@ -1,7 +1,5 @@
 // dbstats/main.go
 // Connects to your MongoDB Atlas and prints live database statistics
-// Run: MONGODB_URI="your_uri" go run main.go
-
 package main
 
 import (
@@ -17,15 +15,16 @@ import (
 )
 
 // Deal matches your MongoDB deal document structure
+// Fields used interface{} to prevent "cannot decode 32-bit integer into a string type" errors
 type Deal struct {
-	Title        string  `bson:"title"`
-	Country      string  `bson:"country"`
-	Value        string  `bson:"value"`
-	Status       string  `bson:"status"`
-	Type         string  `bson:"type"`
-	Impact       string  `bson:"impact"`
-	ReviewStatus string  `bson:"reviewStatus"`
-	Date         string  `bson:"date"`
+	Title        string      `bson:"title"`
+	Country      string      `bson:"country"`
+	Value        interface{} `bson:"value"` // Handles both "100" and 100
+	Status       string      `bson:"status"`
+	Type         string      `bson:"type"`
+	Impact       string      `bson:"impact"`
+	ReviewStatus string      `bson:"reviewStatus"`
+	Date         interface{} `bson:"date"`  // Handles both "2026" and 2026
 }
 
 func main() {
@@ -48,7 +47,6 @@ func main() {
 	}
 	defer client.Disconnect(ctx)
 
-	// Ping to confirm connection
 	if err := client.Ping(ctx, nil); err != nil {
 		fmt.Printf("❌ Ping failed: %v\n", err)
 		os.Exit(1)
@@ -58,7 +56,6 @@ func main() {
 	db := client.Database("finbank")
 	collection := db.Collection("deals")
 
-	// Fetch all deals
 	cursor, err := collection.Find(ctx, bson.M{})
 	if err != nil {
 		fmt.Printf("❌ Query failed: %v\n", err)
@@ -73,14 +70,7 @@ func main() {
 	}
 
 	// ── Compute stats ──
-
-	// Review status counts
 	statusCount := map[string]int{}
-	for _, d := range deals {
-		statusCount[d.ReviewStatus]++
-	}
-
-	// Country breakdown (approved only)
 	countryCount := map[string]int{}
 	typeCount := map[string]int{}
 	impactCount := map[string]int{}
@@ -88,6 +78,8 @@ func main() {
 	approvedDeals := 0
 
 	for _, d := range deals {
+		statusCount[d.ReviewStatus]++
+
 		if d.ReviewStatus != "approved" {
 			continue
 		}
@@ -96,20 +88,30 @@ func main() {
 		typeCount[d.Type]++
 		impactCount[d.Impact]++
 
-		// Parse value
+		// Safe parsing for Value interface{}
 		val := 0.0
-		fmt.Sscanf(d.Value, "%f", &val)
+		switch v := d.Value.(type) {
+		case float64:
+			val = v
+		case int32:
+			val = float64(v)
+		case int64:
+			val = float64(v)
+		case string:
+			fmt.Sscanf(v, "%f", &val)
+		}
 		totalValue += val
 	}
 
-	// Sort countries by count
-	type kv struct {
+	var sortedCountries []struct {
 		Key   string
 		Value int
 	}
-	var sortedCountries []kv
 	for k, v := range countryCount {
-		sortedCountries = append(sortedCountries, kv{k, v})
+		sortedCountries = append(sortedCountries, struct {
+			Key   string
+			Value int
+		}{k, v})
 	}
 	sort.Slice(sortedCountries, func(i, j int) bool {
 		return sortedCountries[i].Value > sortedCountries[j].Value
@@ -124,7 +126,6 @@ func main() {
 	fmt.Printf("   Total documents in DB : %d\n", len(deals))
 	fmt.Printf("   Approved deals        : %d\n", statusCount["approved"])
 	fmt.Printf("   Pending review        : %d\n", statusCount["pending"])
-	fmt.Printf("   Rejected              : %d\n", statusCount["rejected"])
 	fmt.Printf("   Total estimated value : $%.1fB\n\n", totalValue)
 
 	fmt.Printf("🌍 TOP 10 PARTNER COUNTRIES\n")
