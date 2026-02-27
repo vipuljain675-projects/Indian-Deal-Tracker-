@@ -56,23 +56,32 @@ function getFlag(country: string): string {
   return countryFlags[country] || '🌐';
 }
 
-function formatValue(value: string): string {
-  if (!value || value === '0') return '';
-  const num = parseFloat(value.replace(/[^0-9.]/g, ''));
-  if (isNaN(num)) return value;
+/**
+ * FIXED: Added String() conversion to prevent crashes if 'value' is a number
+ * from MongoDB.
+ */
+function formatValue(value: any): string {
+  if (value === undefined || value === null || value === '0' || value === 0) return '';
+  
+  // Convert to string safely before using string methods like .replace()
+  const stringValue = String(value);
+  const num = parseFloat(stringValue.replace(/[^0-9.]/g, ''));
+  
+  if (isNaN(num)) return stringValue;
   return `$${num}B`;
 }
 
 export default function DealCard({ deal }: { deal: IDeal }) {
-  const statusClass = deal.status.toLowerCase().replace(/\s+/g, '-');
-  const flag = getFlag(deal.country);
+  // Safe string conversion for status to prevent replace() errors
+  const statusClass = String(deal.status || '').toLowerCase().replace(/\s+/g, '-');
+  const flag = getFlag(deal.country || '');
   const typeIcon = typeIcons[deal.type] || '📋';
   const impactStyle = impactColors[deal.impact] || impactColors['Low Impact'];
   const formattedValue = formatValue(deal.value);
 
-  // Extract year from date string
+  // Extract year from date safely
   const year = deal.date
-    ? deal.date.toString().match(/\d{4}/)?.[0] || deal.date
+    ? String(deal.date).match(/\d{4}/)?.[0] || String(deal.date)
     : '';
 
   return (
@@ -80,7 +89,7 @@ export default function DealCard({ deal }: { deal: IDeal }) {
       <div className="card-top">
         <div className="card-country-row">
           <span className="card-flag">{flag}</span>
-          <span className="card-country">{deal.country.toUpperCase()}</span>
+          <span className="card-country">{(deal.country || 'Unknown').toUpperCase()}</span>
           {year && <span className="card-year">• {year}</span>}
         </div>
         {formattedValue && (
@@ -119,7 +128,7 @@ export default function DealCard({ deal }: { deal: IDeal }) {
                 display: 'inline-block',
               }}
             />
-            {deal.impact.replace(' Impact', '')}
+            {String(deal.impact).replace(' Impact', '')}
           </span>
         )}
       </div>
