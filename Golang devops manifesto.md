@@ -1,7 +1,7 @@
- # 🐹 Golang DevOps Manifesto
+# 🐹 Golang DevOps Manifesto
 ## India Deals Tracker — Complete DevOps Reference
 
-> Everything you need to run, understand, and extend the 5 Go DevOps tools built for this project.
+> Everything you need to run, understand, and extend the 7 Go DevOps tools built for this project.
 
 ---
 
@@ -14,7 +14,9 @@ india-deals-tracker/
     ├── notifier/       ← Tool 2: Deployment Watcher
     ├── dbstats/        ← Tool 3: Database Stats
     ├── deals-cli/      ← Tool 4: CLI Tool
-    └── metrics/        ← Tool 5: Metrics Collector
+    ├── metrics/        ← Tool 5: Metrics Collector
+    ├── deals-infra/    ← Tool 6: Infrastructure Manager (Terraform)
+    └── watchdog/       ← Tool 7: Multi-Cloud Deploy + Failover
 ```
 
 ---
@@ -27,22 +29,41 @@ brew install go
 go version   # should show go1.21+
 ```
 
-Set your environment variables (add to ~/.zshrc to make permanent):
+Install Terraform (needed for Tools 6 & 7):
 ```bash
-export BASE_URL="https://indian-deal-tracker.vercel.app"
-export CRON_SECRET="mySuperSecret123"
-export MONGODB_URI="mongodb+srv://vipuljain675_db_user:...@cluster0.xpr7jsw.mongodb.net/finbank"
-export HEALTH_URL="https://indian-deal-tracker.vercel.app/api/health"
-export GITHUB_TOKEN="ghp_your_token_here"
-export GITHUB_REPO="vipuljain675-projects/Indian-Deal-Tracker-"
+brew uninstall terraform   # if old version exists
+brew install terraform
+terraform version          # should show v1.14.6+
 ```
 
-Make permanent (so you don't re-type every session):
+Set your environment variables — add to `~/.zshrc` to make permanent:
 ```bash
 nano ~/.zshrc
-# paste the exports above at the bottom
-# save with Ctrl+X → Y → Enter
+# paste everything below, save with Ctrl+X → Y → Enter
 source ~/.zshrc   # reload
+```
+
+```bash
+# App
+export BASE_URL="https://indian-deal-tracker.vercel.app"
+export CRON_SECRET="mySuperSecret123"
+export HEALTH_URL="https://indian-deal-tracker.vercel.app/api/health"
+
+# Database
+export MONGODB_URI="mongodb+srv://vipuljain675_db_user:...@cluster0.xpr7jsw.mongodb.net/finbank"
+
+# GitHub
+export GITHUB_TOKEN="ghp_your_token_here"
+export GITHUB_REPO="vipuljain675-projects/Indian-Deal-Tracker-"
+
+# Vercel (for Tool 6)
+export VERCEL_API_TOKEN="your_vercel_token"
+export VERCEL_PROJECT_ID="prj_xxxxxxxxxxxx"
+export VERCEL_ORG_ID="team_xxxxxxxxxxxx"
+
+# Render (for Tool 7)
+export RENDER_API_TOKEN="rnd_xxxxxxxxxxxx"
+export RENDER_OWNER_ID="tea-d58k22ili9vc73a4ac00"
 ```
 
 ---
@@ -64,33 +85,13 @@ cd devops-go/monitor
 go run main.go
 ```
 
-**With custom URL:**
-```bash
-HEALTH_URL=http://localhost:3000/api/health go run main.go
-```
-
 **What you'll see:**
 ```
-🚀 India Deals Tracker Monitor
-📡 Watching: https://indian-deal-tracker.vercel.app/api/health
-⏱️  Interval: every 1m0s
-
 [2026-02-26 16:44:39] ✅ UP  | 465ms | 161 deals | Uptime: 100.0%
 [2026-02-26 16:45:39] ✅ UP  | 435ms | 161 deals | Uptime: 100.0%
 [2026-02-26 16:46:40] ❌ DOWN | Error: connection timeout
-[2026-02-26 16:47:40] ❌ DOWN | Error: connection timeout
-[2026-02-26 16:48:40] ❌ DOWN | Error: connection timeout
 🚨 ALERT: Site has been DOWN for 3 consecutive checks!
 ```
-
-**What each column means:**
-| Column | Meaning |
-|--------|---------|
-| Timestamp | Exact time of check |
-| ✅ / ❌ | Site up or down |
-| 465ms | How fast the server responded |
-| 161 deals | Deals count from DB (confirms DB is connected) |
-| Uptime % | % of checks that were UP |
 
 **Stop it:** `Ctrl+C`
 
@@ -102,38 +103,16 @@ HEALTH_URL=http://localhost:3000/api/health go run main.go
 
 **What it does:**
 Watches your GitHub Actions pipeline every 30 seconds.
-When you `git push`, this tells you instantly when the deploy starts,
-is running, succeeded, or failed — without opening GitHub.
+When you `git push`, tells you instantly when deploy starts, runs, succeeds or fails.
 
 **Location:** `devops-go/notifier/`
 
 **Run:**
 ```bash
 cd devops-go/notifier
-
 export GITHUB_TOKEN="ghp_your_token_here"
 export GITHUB_REPO="vipuljain675-projects/Indian-Deal-Tracker-"
-
 go run main.go
-```
-
-**What you'll see after a git push:**
-```
-🚀 Deployment Watcher — India Deals Tracker
-📦 Repo   : vipuljain675-projects/Indian-Deal-Tracker-
-🔄 Polling every 30 seconds
-
-[17:12:41] Current state:
-  ✅ #12847  completed   success    [a3f9c12] main
-
-🔔 NEW DEPLOYMENT DETECTED!
-   Branch  : main
-   Commit  : d4a1b9c
-   Status  : in_progress
-
-[17:13:11] ⏳ DEPLOYING... (commit d4a1b9c on main)
-[17:13:41] ⏳ DEPLOYING... (commit d4a1b9c on main)
-[17:14:11] ✅ DEPLOYED SUCCESSFULLY! commit d4a1b9c → live on Vercel 🎉
 ```
 
 **Get a GitHub Token:**
@@ -151,9 +130,8 @@ go run main.go
 ## 📊 Tool 3 — Database Stats
 
 **What it does:**
-Connects directly to MongoDB Atlas and prints a full breakdown of your
-deals — counts, countries, types, values, pending items.
-Faster than opening the Atlas UI.
+Connects directly to MongoDB Atlas and prints a full breakdown —
+counts, countries, types, values, pending items. Faster than Atlas UI.
 
 **Location:** `devops-go/dbstats/`
 
@@ -171,43 +149,26 @@ MONGODB_URI="your_mongodb_uri" go run main.go
 
 **What you'll see:**
 ```
-╔══════════════════════════════════════════╗
-║     🇮🇳 India Deals Tracker — DB Stats    ║
-╚══════════════════════════════════════════╝
-
 📊 OVERVIEW
    Total documents in DB : 164
    Approved deals        : 161
-   Pending review        : 3       ← deals waiting for your approval
-   Rejected              : 0
+   Pending review        : 3
    Total estimated value : $2505.1B
 
 🌍 TOP 10 PARTNER COUNTRIES
-   USA                  ████████████████████████████████████ 37
-   Russia               ████████████████████████ 25
-   France               ████████████ 13
-   Israel               ██████████ 11
-   United Kingdom       ██████ 7
+   USA    ████████████████████████████████████ 37
+   Russia ████████████████████████ 25
+   France ████████████ 13
 
 📦 DEAL TYPES
-   Defense Acquisition        63 deals (39%)
-   Trade                      34 deals (21%)
-   Diplomatic                 30 deals (19%)
-   Technology                 22 deals (14%)
-   Energy                     12 deals (7%)
+   Defense Acquisition  63 deals (39%)
+   Trade                34 deals (21%)
 
 ⚡ IMPACT LEVELS
-   🔴 High Impact             95 deals
-   🟡 Medium Impact           53 deals
-   🟢 Low Impact              13 deals
-
-⏰ Report generated: 2026-02-26 15:59:28
+   🔴 High Impact   95 deals
+   🟡 Medium Impact 53 deals
+   🟢 Low Impact    13 deals
 ```
-
-**When to use this:**
-- Quick DB health check without opening MongoDB Atlas UI
-- Checking how many deals are pending review
-- Verifying the seed script added deals correctly
 
 ---
 
@@ -224,141 +185,41 @@ Approve/reject deals, search, see stats — all in one command.
 **Setup:**
 ```bash
 cd devops-go/deals-cli
-
 export BASE_URL="https://indian-deal-tracker.vercel.app"
 export CRON_SECRET="mySuperSecret123"
 ```
 
----
-
 ### All Commands
 
-#### `stats` — Live database overview
 ```bash
-go run main.go stats
-```
-```
-🇮🇳 India Deals Tracker — Live Stats
-─────────────────────────────────────────────
-Server        ● HEALTHY
-Approved      161 deals
-Pending       3 deals waiting for your review
-Total value   $2505.1B
-
-Top Partners
-  USA             ██████████████████ 37
-  Russia          ████████████ 25
-  France          ██████ 13
-
-Deal Types
-  Defense Acquisition        63 deals (39%)
-  Trade                      34 deals (21%)
+go run main.go stats              # Live DB overview
+go run main.go pending            # Deals waiting for approval
+go run main.go approve <id>       # Approve a deal → goes live
+go run main.go reject <id>        # Reject a deal → removed
+go run main.go search rafale      # Search by keyword
+go run main.go top                # Top 10 deals by value
+go run main.go help               # Show all commands
 ```
 
----
-
-#### `pending` — See deals waiting for approval
-```bash
-go run main.go pending
-```
+**Example — pending:**
 ```
 📋 3 deals waiting for review:
-──────────────────────────────────────────────────────────────────────
 
 [1]  India-Japan Semiconductor Partnership
     ID      : 65abc123def456789012345a
-    Country : Japan
-    Value   : $2.5B
-    Type    : Technology
-    Impact  : 🔴 High
-    Status  : Proposed
-    Desc    : Joint semiconductor fabrication agreement...
+    Country : Japan | Value : $2.5B | Impact : 🔴 High
 
     approve: go run main.go approve 65abc123def456789012345a
     reject:  go run main.go reject  65abc123def456789012345a
 ```
 
----
-
-#### `approve` — Approve a pending deal
-```bash
-go run main.go approve 65abc123def456789012345a
-```
-```
-Approving deal 65abc123def456789012345a...
-✅ Deal approved! It's now live on the dashboard.
-```
-
----
-
-#### `reject` — Reject a pending deal
-```bash
-go run main.go reject 65abc123def456789012345a
-```
-```
-🗑️  Deal rejected and removed from queue.
-```
-
----
-
-#### `search` — Search deals by keyword
-```bash
-go run main.go search rafale
-```
+**Example — search rafale:**
 ```
 🔍 3 deals matching "rafale":
-─────────────────────────────────────────────────────────────────
 
-  114 Rafale MRFA Deal (Multi-Role Fighter Aircraft)
-  France · $40B · In Progress · 2025
-  India's cabinet approved a massive ~$40B deal for 114 Rafale MRFA jets...
-
-  India-France Rafale Deal
-  France · $35B · Proposed · 2026
-  India and France are discussing a potential $35 billion...
-
-  India-France Rafale Fighter Jet Deal (36 Aircraft)
-  France · $8.7B · Completed · 2016
-  India purchased 36 Rafale multi-role combat aircraft...
-```
-
-Other search examples:
-```bash
-go run main.go search russia
-go run main.go search submarine
-go run main.go search missile
-go run main.go search usa
-go run main.go search trade
-```
-
----
-
-#### `top` — Top 10 deals by value
-```bash
-go run main.go top
-```
-```
-💰 Top 10 Deals by Value
-─────────────────────────────────────────────────────────────────
-
-🥇 India–European Union Free Trade Agreement
-   European Union · $500B · Signed
-
-🥈 India–USA Bilateral Trade Agreement (Trump–Modi Deal)
-   USA · $500B · In Progress
-
-🥉 India–UK Free Trade Agreement Negotiations
-   United Kingdom · $120B · In Progress
-
-4️⃣  India–ASEAN FTA (Free Trade in Goods Agreement)
-   ASEAN · $100B · Completed
-```
-
----
-
-#### `help` — Show all commands
-```bash
-go run main.go help
+  114 Rafale MRFA Deal · France · $40B · In Progress · 2025
+  India-France Rafale Deal · France · $35B · Proposed · 2026
+  India-France Rafale Fighter Jet Deal · France · $8.7B · Completed · 2016
 ```
 
 ---
@@ -369,123 +230,214 @@ go run main.go help
 
 **What it does:**
 Records your app's response time and deal count every 5 minutes
-into a `metrics.csv` file. After collecting data you can see trends —
-was your site slow on Tuesday? Did it get slower after a deploy?
+into `metrics.csv`. Shows trends over time.
 
 **Location:** `devops-go/metrics/`
 
+### Commands
+
+```bash
+cd devops-go/metrics
+
+go run main.go collect   # Run forever — records every 5 min
+go run main.go report    # Full analysis of all data
+go run main.go today     # Just today's metrics
+```
+
+**Example — collect:**
+```
+[18:10:17] ✅ UP | fast 655ms  | 161 deals | Check #1
+[18:33:39] ✅ UP | slow 1046ms | 161 deals | Check #3  ← caught slow!
+[19:41:25] ✅ UP | fast 629ms  | 164 deals | Check #8  ← deals grew 161→164!
+```
+
+**Example — report:**
+```
+📈 OVERALL PERFORMANCE
+  Uptime        100.00%
+  Avg response  623ms
+  Fastest       435ms
+  P95 response  980ms   ← worst case 95% of the time
+
+🕐 BY HOUR
+  09:00  ███████ 550ms  ← morning fast
+  14:00  ████████████ 800ms  ← afternoon slower
+  22:00  █████ 400ms  ← night fastest
+```
+
+Speed labels: `fast` <500ms ✅ | `slow` 500-1500ms ⚠️ | `very slow` >3000ms 🚨
+
 ---
+
+---
+
+## 🏗️ Tool 6 — Infrastructure Manager
+
+**What it does:**
+Go generates a complete Terraform config describing your entire Vercel
+infrastructure, then runs `terraform apply` automatically.
+If you ever lose your Vercel project — one command recreates everything.
+
+**Location:** `devops-go/deals-infra/`
+
+**Setup — get your Vercel IDs:**
+- `VERCEL_API_TOKEN` → vercel.com → Settings → Tokens → Create
+- `VERCEL_PROJECT_ID` → vercel.com → your project → Settings → General → Project ID
+- `VERCEL_ORG_ID` → vercel.com → Settings → General → Team ID
 
 ### Commands
 
-#### `collect` — Start recording (runs forever)
 ```bash
-cd devops-go/metrics
-go run main.go collect
-```
-```
-📊 Metrics Collector — India Deals Tracker
-📡 Watching : https://indian-deal-tracker.vercel.app/api/health
-💾 Saving to: metrics.csv
-⏱️  Interval : every 5 minutes
+cd devops-go/deals-infra
 
-[2026-02-26 18:10:17] ✅ UP | fast 655ms  | 161 deals | Check #1
-[2026-02-26 18:28:38] ✅ UP | fast 521ms  | 161 deals | Check #2
-[2026-02-26 18:33:39] ✅ UP | slow 1046ms | 161 deals | Check #3
-[2026-02-26 19:41:25] ✅ UP | fast 629ms  | 164 deals | Check #8
+go run main.go generate   # Preview the .tf file — safe, no changes
+go run main.go plan       # Dry run — show what would change
+go run main.go deploy     # Full deploy: generate .tf + terraform apply
+go run main.go status     # Show current deployed state
+go run main.go destroy    # Remove Vercel project (careful!)
 ```
 
-Speed labels:
-- `fast` = under 500ms ✅
-- `slow` = 500ms–1500ms ⚠️
-- `very slow` = over 3000ms 🚨
-
-Stop it: `Ctrl+C`
-
----
-
-#### `report` — Full analysis of all collected data
-```bash
-# Open a NEW terminal tab (keep collect running in the other)
-cd devops-go/metrics
-go run main.go report
+**What deploy does:**
 ```
-```
-📊 Metrics Report — India Deals Tracker
-Based on 47 data points
+📝 Step 1/3 — Generating infrastructure.tf...
+   Describes: 1 Vercel project + 4 env vars + GitHub connection + Mumbai region
 
-📈 OVERALL PERFORMANCE
-─────────────────────────────────────────────
-  Uptime          100.00%
-  Avg response    623ms
-  Fastest         435ms
-  Slowest         1046ms
-  P95 response    980ms        ← worst case 95% of the time
-  Total downtime  0 checks down
-  Data collected  Feb 24 to Feb 26 19:41
+📦 Step 2/3 — terraform init...
+   Vercel provider downloaded
 
-🕐 RESPONSE TIME BY HOUR (avg)
-─────────────────────────────────────────────
-  09:00  ███████████ 550ms     ← morning fast
-  14:00  ████████████████ 800ms ← afternoon slower
-  22:00  ████████ 400ms        ← night fastest
+⚡ Step 3/3 — terraform apply...
+   Type 'yes' to confirm
 
-📦 DEAL COUNT OVER TIME
-─────────────────────────────────────────────
-  Feb 24  161 deals
-  Feb 25  161 deals
-  Feb 26  164 deals            ← 3 new deals added!
-
-🐢 SLOWEST RESPONSES (top 5)
-─────────────────────────────────────────────
-  1046ms  Feb 26 18:33  healthy
-  954ms   Feb 26 18:48  healthy
+✅ Done! Vercel project is live.
 ```
 
----
-
-#### `today` — Just today's data
-```bash
-cd devops-go/metrics
-go run main.go today
+**⚠️ Never commit these files (already in .gitignore):**
 ```
-```
-📅 Today's Metrics — 2026-02-26
-───────────────────────────────────────────────────────
-  ✅ 18:10  655ms  161 deals
-  ✅ 18:28  521ms  161 deals
-  ✅ 18:33  1046ms 161 deals
-  ✅ 18:38  520ms  161 deals
-───────────────────────────────────────────────────────
-  Checks: 8  |  Avg: 652ms  |  Uptime: 100.0%
+infrastructure.tf    ← contains your secrets
+terraform.tfstate    ← contains deployed state
+.terraform/          ← provider binaries
 ```
 
 ---
 
 ---
 
-## 🖥️ Run All 5 Tools Simultaneously
+## 🐕 Tool 7 — Multi-Cloud Watchdog
 
-Open 5 terminal tabs in VSCode (`Ctrl+Shift+`` five times):
+**What it does:**
+Deploy your app to ANY cloud with a single command.
+Vercel, Railway, or Render — your choice, any time.
+Both clouds share the **same MongoDB** — data always identical.
+
+Also has **auto-failover mode**: if Vercel goes down, automatically
+deploys a backup to Render. When Vercel recovers, removes backup automatically.
+
+**Location:** `devops-go/watchdog/`
+
+**Setup — get Render credentials:**
+```bash
+# 1. render.com → Account Settings → API Keys → Create API Key
+
+# 2. Get Owner ID:
+curl -H "Authorization: Bearer your_render_token" \
+  "https://api.render.com/v1/owners?limit=1"
+# Copy the "id" value → looks like "tea-xxxxxxxxxxxx"
+
+export RENDER_API_TOKEN="rnd_xxxxxxxxxxxx"
+export RENDER_OWNER_ID="tea-d58k22ili9vc73a4ac00"
+```
+
+### Commands
 
 ```bash
-# Tab 1 — Health Monitor
+cd devops-go/watchdog
+
+# ── Deploy to any cloud ──
+go run main.go deploy vercel    # Deploy to Vercel
+go run main.go deploy render    # Deploy to Render ← we did this!
+go run main.go deploy railway   # Deploy to Railway
+
+# ── Remove a deployment ──
+go run main.go destroy vercel
+go run main.go destroy render
+go run main.go destroy railway
+
+# ── Monitor ──
+go run main.go status           # Check all clouds at once
+go run main.go watchdog         # Auto-failover mode (runs forever)
+```
+
+**Example — deploy render:**
+```
+🚀 Deploying to RENDER...
+  App    : india-deals-tracker
+  Cloud  : render
+  Repo   : vipuljain675-projects/Indian-Deal-Tracker-
+  EnvVars: 4 variables
+
+📝 Step 1/3 — Generating render.tf...
+📦 Step 2/3 — terraform init... ✓
+⚡ Step 3/3 — terraform apply... type 'yes'
+
+✅ Deployed to RENDER!
+   🔗 URL: https://india-deals-tracker.onrender.com
+```
+
+**Example — status:**
+```
+📊 Multi-Cloud Status
+  Vercel  (primary)  ✅ UP (610ms, 164 deals)
+  Railway (backup)   💤 not deployed
+  Render  (backup)   ✅ UP (890ms, 164 deals)
+```
+
+**Example — watchdog mode:**
+```
+[21:00] ✅ Vercel UP | fast | 438ms
+[21:02] ❌ Vercel DOWN | failure 1/3
+[21:04] ❌ Vercel DOWN | failure 3/3
+
+🚨 VERCEL IS DOWN! Deploying backup to Render...
+✅ BACKUP LIVE: https://india-deals-tracker.onrender.com
+   Share this URL until Vercel recovers!
+
+[21:35] ✅ Vercel recovered! Removing Render backup...
+✅ Back to normal. Vercel is primary.
+```
+
+**Current live deployments:**
+| Cloud | URL |
+|-------|-----|
+| Vercel (primary) | https://indian-deal-tracker.vercel.app |
+| Render (backup) | https://india-deals-tracker.onrender.com |
+
+---
+
+---
+
+## 🖥️ Run All 7 Tools
+
+```bash
+# Tab 1 — Health Monitor (runs forever)
 cd devops-go/monitor && go run main.go
 
-# Tab 2 — Deployment Watcher
-cd devops-go/notifier
-export GITHUB_TOKEN="ghp_..."
-export GITHUB_REPO="vipuljain675-projects/Indian-Deal-Tracker-"
-go run main.go
+# Tab 2 — Deployment Watcher (runs forever)
+cd devops-go/notifier && go run main.go
 
-# Tab 3 — DB Stats (run on demand, not forever)
+# Tab 3 — Metrics Collector (runs forever)
+cd devops-go/metrics && go run main.go collect
+
+# Tab 4 — Watchdog auto-failover (runs forever)
+cd devops-go/watchdog && go run main.go watchdog
+
+# Tab 5 — DB Stats (run on demand)
 cd devops-go/dbstats && MONGODB_URI="..." go run main.go
 
-# Tab 4 — CLI Tool (run on demand)
+# Tab 6 — CLI Tool (run on demand)
 cd devops-go/deals-cli && go run main.go stats
 
-# Tab 5 — Metrics Collector
-cd devops-go/metrics && go run main.go collect
+# Tab 7 — Infrastructure (run on demand)
+cd devops-go/deals-infra && go run main.go status
 ```
 
 ---
@@ -506,35 +458,45 @@ cd devops-go/metrics && go run main.go collect
 | Metrics | `go run main.go collect` | Record every 5 min |
 | Metrics | `go run main.go report` | Full analysis |
 | Metrics | `go run main.go today` | Today only |
+| Infra | `go run main.go generate` | Preview .tf file |
+| Infra | `go run main.go plan` | Dry run |
+| Infra | `go run main.go deploy` | Full Vercel deploy |
+| Watchdog | `go run main.go deploy render` | Deploy to Render |
+| Watchdog | `go run main.go deploy railway` | Deploy to Railway |
+| Watchdog | `go run main.go deploy vercel` | Deploy to Vercel |
+| Watchdog | `go run main.go destroy render` | Remove from Render |
+| Watchdog | `go run main.go status` | Check all clouds |
+| Watchdog | `go run main.go watchdog` | Auto-failover mode |
 
 ---
 
-## 🧠 Go Concepts Used Across These Tools
+## 🧠 Go Concepts Used
 
 | Concept | What it is | Where used |
 |---------|-----------|------------|
-| `struct` | Like TypeScript interface — defines data shape | All tools |
+| `struct` | Like TypeScript interface | All tools |
 | `func` | A function | All tools |
-| `http.Client` | Makes HTTP requests (like fetch in JS) | Monitor, CLI, Metrics |
-| `encoding/json` | Parse JSON responses | All tools |
-| `os.Getenv` | Read environment variables | All tools |
-| `os.Args` | Read command line arguments | CLI tool |
-| `for {}` | Infinite loop — keeps running | Monitor, Notifier, Metrics |
+| `http.Client` | HTTP requests (like fetch) | Monitor, CLI, Metrics, Watchdog |
+| `encoding/json` | Parse JSON | All tools |
+| `os.Getenv` | Read env vars | All tools |
+| `os.Args` | Read CLI arguments | CLI, Watchdog, Infra |
+| `os/exec` | Run other programs (terraform) | Watchdog, Infra |
+| `for {}` | Infinite loop | Monitor, Notifier, Metrics, Watchdog |
 | `time.Sleep` | Wait between checks | Monitor, Notifier, Metrics |
-| `switch` | Like if/else for multiple cases | CLI, Metrics |
-| `csv.Writer` | Write data to CSV file | Metrics |
+| `switch` | If/else for multiple cases | All tools |
+| `strings.Builder` | Build long strings | Watchdog, Infra |
+| `os.WriteFile` | Write file to disk | Watchdog, Infra |
+| `bufio.Scanner` | Read file line by line | Watchdog, Infra |
+| `csv.Writer` | Write CSV file | Metrics |
 | `sort.Slice` | Sort a list | CLI, DB Stats, Metrics |
 | `context.WithTimeout` | DB connection timeout | DB Stats |
-| `goroutines` (future) | True parallel execution | Can extend any tool |
 
 ---
 
 ## 🔮 Future Improvements
 
-### Add Telegram Alerts to Monitor
-When site goes down, get a WhatsApp-style message instantly:
+### Telegram Alerts
 ```go
-// In monitor/main.go, replace the TODO with:
 func sendTelegramAlert(message string) {
     botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
     chatID := os.Getenv("TELEGRAM_CHAT_ID")
@@ -546,29 +508,51 @@ func sendTelegramAlert(message string) {
 }
 ```
 Get bot token free from @BotFather on Telegram in 2 minutes.
+Add to monitor → get Telegram message when site goes down.
 
-### Deploy Monitor to Railway (run 24/7)
+### Build Binaries (skip `go run`)
+```bash
+cd devops-go/deals-cli && go build -o deals-cli
+./deals-cli stats
+./deals-cli search rafale
+
+cd devops-go/watchdog && go build -o watchdog
+./watchdog deploy render
+./watchdog status
+```
+
+### Deploy Monitor 24/7 on Render
 ```bash
 # Compile for Linux
 cd devops-go/monitor
 GOOS=linux GOARCH=amd64 go build -o deals-monitor
 
-# Deploy to Railway free tier
-# railway.app → New Project → Deploy → add HEALTH_URL env var
-# Now runs 24/7 even when your Mac is off
+# render.com → New Web Service → add HEALTH_URL env var
+# Monitors your site 24/7 even when Mac is off
 ```
 
-### Build Binary (run without go run)
-```bash
-cd devops-go/deals-cli
-go build -o deals-cli
-
-# Now just type:
-./deals-cli stats
-./deals-cli pending
-./deals-cli search rafale
+### Add More Clouds to Watchdog
+```go
+// In watchdog/main.go, add to the clouds map:
+"netlify": {
+    dir:      "tf-netlify",
+    generate: func() string { return generateNetlifyTF(cfg) },
+    token:    cfg.NetlifyToken,
+    tokenVar: "NETLIFY_API_TOKEN",
+},
+// Then: go run main.go deploy netlify
 ```
 
 ---
 
-*Built with Go 1.21 · India Deals Tracker DevOps Suite · February 2026*
+## 🌐 Live URLs
+
+| Environment | URL |
+|-------------|-----|
+| Vercel (primary) | https://indian-deal-tracker.vercel.app |
+| Render (backup) | https://india-deals-tracker.onrender.com |
+
+---
+
+*Built with Go 1.21 + Terraform 1.14 · India Deals Tracker DevOps Suite · February 2026*
+*7 tools · 2 clouds · 1 database · infinite reliability 🇮🇳*

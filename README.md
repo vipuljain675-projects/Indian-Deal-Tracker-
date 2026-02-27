@@ -1,11 +1,13 @@
 # 🇮🇳 India Deals Tracker
 
-> A real-time intelligence dashboard tracking every major defence, trade, and strategic deal India has signed since 1947 — powered by AI-driven news scanning, human review, a built-in deals analyst, and a full production-grade DevOps pipeline.
+> A real-time intelligence dashboard tracking every major defence, trade, and strategic deal India has signed since 1947 — powered by AI-driven news scanning, human review, a built-in deals analyst, a full production-grade DevOps pipeline, and multi-cloud deployment.
 
 ![Next.js](https://img.shields.io/badge/Next.js-16.1-black?style=flat-square&logo=next.js)
 ![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-green?style=flat-square&logo=mongodb)
 ![Groq](https://img.shields.io/badge/AI-Groq%20Llama%203.3-orange?style=flat-square)
 ![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-blue?style=flat-square&logo=github-actions)
+![Go](https://img.shields.io/badge/DevOps-Go%201.21-00ADD8?style=flat-square&logo=go)
+![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?style=flat-square&logo=terraform)
 ![Uptime](https://img.shields.io/badge/Monitoring-UptimeRobot-red?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square)
 
@@ -21,13 +23,14 @@ India signs billions of dollars worth of defence, trade, and diplomatic deals ev
 - Extracts structured deal data — title, country, value, type, strategic intent
 - Queues deals for human review before going live
 - Lets you ask questions to an AI analyst with delivery tracking and controversy knowledge
+- Deploys to multiple clouds automatically — if Vercel goes down, Render backup spins up on its own
 
 ---
 
 ## ✨ Features
 
 ### 📊 Live Dashboard
-- 155+ historical deals from 1947 to present
+- 164+ historical deals from 1947 to present
 - Real-time stats: total deals, defence count, total value, partner nations
 - Filter by type, status, country, and impact level
 - Deals sorted latest-first by year (2026 at top, 1947 at bottom)
@@ -49,7 +52,7 @@ India signs billions of dollars worth of defence, trade, and diplomatic deals ev
 - **Paste URL / Text** — extract deals from articles on demand
 - **Auto-Scan** — trigger a manual news scan
 - **Add Manually** — form to add any deal directly (goes live instantly)
-- **Seed Historical Data** — one-click button to load all 155 historical deals
+- **Seed Historical Data** — one-click button to load all historical deals
 
 ### 🧠 Deals Intelligence AI
 - Floating chat panel on every page
@@ -57,6 +60,12 @@ India signs billions of dollars worth of defence, trade, and diplomatic deals ev
 - Covers controversy and corruption angles (Rafale, Bofors, AgustaWestland)
 - Gives both sides of every argument — not just government PR
 - Powered by Groq Llama 3.3 70B — same free API key, no extra cost
+
+### 🐕 Multi-Cloud Deployment
+- Live on **Vercel** (primary) and **Render** (backup) simultaneously
+- Both clouds share the same MongoDB — data always identical
+- Go + Terraform tool deploys to any cloud in one command
+- Auto-failover: if Vercel goes down, Render backup activates automatically
 
 ---
 
@@ -68,9 +77,12 @@ India signs billions of dollars worth of defence, trade, and diplomatic deals ev
 | Database | MongoDB Atlas (free tier) |
 | AI Extraction & Chat | Groq API — Llama 3.3 70B Versatile |
 | News Source | NewsAPI (free tier) |
-| Deployment | Vercel (auto-deploy on push) |
+| Primary Deployment | Vercel (auto-deploy on push) |
+| Backup Deployment | Render (deployed via Go + Terraform) |
 | CI/CD | GitHub Actions |
-| Monitoring | UptimeRobot |
+| Infrastructure as Code | Terraform |
+| DevOps Tooling | Go 1.21 (7 custom tools) |
+| Monitoring | UptimeRobot + Custom Go Monitor |
 | Styling | Pure CSS with CSS variables |
 
 **100% free to run.** No paid APIs required.
@@ -79,7 +91,7 @@ India signs billions of dollars worth of defence, trade, and diplomatic deals ev
 
 ## 🔧 DevOps Architecture
 
-This project runs on a full production-grade DevOps pipeline. Here's exactly what happens from code to live site — automatically.
+This project runs on a full production-grade DevOps pipeline across two clouds.
 
 ### The Complete Flow
 
@@ -98,17 +110,26 @@ git push origin main
 │  ❌ Any fail → blocked      │
 └──────────────┬──────────────┘
                ↓
-┌─────────────────────────────┐
-│   Vercel Auto-Deploy        │
-│  Pulls new code from main   │
-│  Builds and deploys in ~2m  │
-│  Live at vercel.app/        │
-└──────────────┬──────────────┘
+┌──────────────────────────────────────┐
+│   Multi-Cloud Deployment             │
+│                                      │
+│   Vercel (PRIMARY)                   │
+│   Auto-deploys from main branch      │
+│   indian-deal-tracker.vercel.app     │
+│                                      │
+│   Render (BACKUP)                    │
+│   Deployed via Go + Terraform        │
+│   india-deals-tracker.onrender.com   │
+└──────────────┬───────────────────────┘
                ↓
 ┌─────────────────────────────┐
-│   UptimeRobot Monitoring    │
-│  Pings /api/health every 5m │
-│  Emails you if site is down │
+│   Go DevOps Suite (7 tools) │
+│  • Health Monitor (60s)     │
+│  • Metrics Collector        │
+│  • Auto-failover Watchdog   │
+│  • CLI deal management      │
+│  • DB analytics             │
+│  • Terraform infra manager  │
 └──────────────┬──────────────┘
                ↓
 ┌─────────────────────────────┐
@@ -127,51 +148,92 @@ git push origin main
 Every `git push` to `main` triggers an automated pipeline with two jobs:
 
 **Job 1 — lint-and-typecheck:**
-```yaml
-- TypeScript strict type checking (tsc --noEmit)
+- TypeScript strict type checking (`tsc --noEmit`)
 - ESLint code quality checks
-```
 
 **Job 2 — build:**
-```yaml
 - Full Next.js production build
 - Runs with all environment variables injected from GitHub Secrets
+
+If either job fails → deployment blocked automatically. Broken code never reaches users.
+
+---
+
+### 2. 🚀 Multi-Cloud Deployment
+
+**Primary — Vercel:**
+Watches `main` branch. The moment GitHub Actions passes, Vercel builds and deploys automatically. Zero manual steps.
+
+**Backup — Render:**
+Deployed via our Go + Terraform watchdog tool. Same app, same MongoDB, different cloud. Deployed once and kept on standby.
+
+```
+Primary:  https://indian-deal-tracker.vercel.app
+Backup:   https://india-deals-tracker.onrender.com
 ```
 
-If either job fails, the deployment is **blocked automatically**. Broken code can never reach your users.
+Both point to the **same MongoDB Atlas database** — data is always identical on both clouds.
+
+---
+
+### 3. 🐹 Go DevOps Suite (7 Tools)
+
+A complete set of Go-powered DevOps tools in `devops-go/`:
+
+| Tool | What it does |
+|------|-------------|
+| `monitor/` | Health check every 60s — better than UptimeRobot free tier |
+| `notifier/` | Watches GitHub Actions — alerts on deploy success/failure |
+| `dbstats/` | MongoDB analytics — countries, types, values, pending queue |
+| `deals-cli/` | Manage deals from terminal — approve, reject, search, stats |
+| `metrics/` | Records response time every 5 min — shows performance trends |
+| `deals-infra/` | Go generates Terraform config → deploys entire Vercel setup in one command |
+| `watchdog/` | Deploy to any cloud in one command + auto-failover |
+
+**Quick examples:**
+```bash
+# Deploy to any cloud instantly
+go run main.go deploy render
+go run main.go deploy vercel
+go run main.go deploy railway
+
+# Manage deals without opening browser
+go run main.go stats
+go run main.go pending
+go run main.go approve 65abc123def456
+
+# Check all clouds at once
+go run main.go status
+```
+
+See `devops-go/GOLANG-DEVOPS-MANIFESTO.md` for the full reference guide.
+
+---
+
+### 4. 🐕 Auto-Failover Watchdog
+
+The watchdog runs permanently and monitors Vercel every 60 seconds. After 3 consecutive failures it automatically deploys a backup to Render via Terraform:
+
+```
+[21:00] ✅ Vercel UP | fast | 438ms | 164 deals
+[21:03] ❌ Vercel DOWN | failure 1/3
+[21:05] ❌ Vercel DOWN | failure 3/3
+
+🚨 VERCEL IS DOWN! Deploying backup to Render via Terraform...
+✅ BACKUP LIVE: https://india-deals-tracker.onrender.com
+
+[21:35] ✅ Vercel recovered! Removing Render backup...
+✅ Back to normal. Vercel is primary.
+```
 
 ```bash
-# Secrets required in GitHub → Settings → Secrets:
-MONGODB_URI
-NEWS_API_KEY
-GROQ_API_KEY
-CRON_SECRET
+cd devops-go/watchdog
+go run main.go watchdog
 ```
 
 ---
 
-### 2. 🚀 Automatic Deployment — Vercel
-
-Vercel watches the `main` branch on GitHub. The moment GitHub Actions passes both jobs, Vercel:
-1. Pulls the latest code
-2. Builds the Next.js app
-3. Deploys to production
-
-**Zero manual steps.** You push code, the world sees it in ~2 minutes.
-
-```bash
-# Environment variables required in Vercel Dashboard:
-# Settings → Environment Variables
-MONGODB_URI
-NEWS_API_KEY
-GROQ_API_KEY
-CRON_SECRET
-NEXT_PUBLIC_CRON_SECRET   # Same value as CRON_SECRET — needed for admin panel
-```
-
----
-
-### 3. ⏰ Scheduled Automation — Vercel Cron
+### 5. ⏰ Scheduled Automation — Vercel Cron
 
 **File:** `vercel.json`
 
@@ -184,81 +246,31 @@ NEXT_PUBLIC_CRON_SECRET   # Same value as CRON_SECRET — needed for admin panel
 }
 ```
 
-Every day at **9:00 AM UTC**, Vercel automatically hits the cron endpoint which:
-- Searches NewsAPI with 4 India deal queries
-- Sends each article to Groq AI for extraction
-- Saves new deals as `reviewStatus: "pending"`
-- They appear in your Admin → Review Queue
-
-**Completely automatic.** You wake up every morning with new deals waiting for review.
-
-> Note: Vercel Hobby plan supports 1 cron job running once daily maximum.
+Every day at **9:00 AM UTC**, Vercel automatically hits the cron endpoint which scans NewsAPI, processes articles with Groq AI, and saves new deals to the review queue. You wake up with new deals ready for review.
 
 ---
 
-### 4. 🏥 Health Check Endpoint
+### 6. 🏥 Health Check Endpoint
 
-**File:** `src/app/api/health/route.ts`
-
-A dedicated monitoring endpoint that:
-- Connects to MongoDB
-- Counts all approved deals
-- Returns status JSON
-
+`GET /api/health` returns:
 ```json
 {
   "status": "healthy",
-  "approvedDeals": 155,
-  "timestamp": "2026-02-21T05:58:50.724Z"
+  "approvedDeals": 164,
+  "timestamp": "2026-02-27T00:00:00.000Z"
 }
 ```
 
-This endpoint exists **purely for monitoring tools** to ping. If MongoDB is down, the connection fails and returns `status: unhealthy`.
+Used by UptimeRobot, the Go health monitor, and the watchdog to confirm both the app and database are responding.
 
 ---
 
-### 5. 📡 Uptime Monitoring — UptimeRobot
+### 7. 🔒 Branch Protection
 
-UptimeRobot pings `https://your-site.vercel.app/api/health` **every 5 minutes, 24/7**.
-
-- ✅ Returns 200 → site marked **Up**
-- ❌ Returns anything else → site marked **Down** → email alert sent immediately
-
-**Why this matters:** Without monitoring, you only discover your site is down when a user complains. UptimeRobot catches it within 5 minutes automatically.
-
-Current stats on this project:
-- Average response time: **28ms**
-- Uptime: **99.7%+**
-
----
-
-### 6. 🔒 Branch Protection
-
-GitHub → Settings → Branches → `main` branch:
-
-- ✅ Require status checks to pass before merging
-- ✅ `lint-and-typecheck` job must pass
-- ✅ `build` job must pass
+GitHub → Settings → Branches → `main`:
+- ✅ Require `lint-and-typecheck` to pass
+- ✅ Require `build` to pass
 - ❌ Direct pushes to main are blocked
-
-Even you (the repo owner) cannot push broken code directly to production. Everything goes through CI first.
-
----
-
-### 7. ♻️ Cache Control
-
-**File:** `src/app/page.tsx` and `src/app/admin/page.tsx`
-
-```typescript
-export const dynamic = 'force-dynamic';
-```
-
-Both the dashboard and admin panel use `force-dynamic` to disable Next.js server-side caching. This ensures:
-- Every page load fetches fresh data from MongoDB
-- Newly approved deals appear immediately
-- Admin review queue stays in sync
-
-Without this, Vercel would cache the server-rendered HTML and users would see stale data for minutes or hours.
 
 ---
 
@@ -267,12 +279,14 @@ Without this, Vercel would cache the server-rendered HTML and users would see st
 | Component | Tool | Purpose | Cost |
 |-----------|------|---------|------|
 | CI Pipeline | GitHub Actions | Test + validate every push | Free |
-| Deployment | Vercel | Auto-deploy on push | Free |
+| Primary Deploy | Vercel | Auto-deploy on push | Free |
+| Backup Deploy | Render | Multi-cloud redundancy | Free |
+| Infrastructure | Go + Terraform | One-command cloud deployment | Free |
 | Scheduling | Vercel Cron | Daily news scan at 9AM UTC | Free |
 | Monitoring | UptimeRobot | Ping health every 5 mins | Free |
-| Health Check | Custom API route | `/api/health` for monitors | Free |
+| Go Monitor | Custom Go tool | Health check every 60s | Free |
+| Failover | Go Watchdog | Auto-deploy backup on failure | Free |
 | Branch Protection | GitHub | Block broken code | Free |
-| Cache Control | Next.js directive | Always fresh data | Built-in |
 
 **Total DevOps cost: $0/month.**
 
@@ -283,44 +297,47 @@ Without this, Vercel would cache the server-rendered HTML and users would see st
 ```
 india-deals-tracker/
 │
-├── .github/
-│   └── workflows/
-│       └── ci.yml                      # GitHub Actions CI/CD pipeline
+├── .github/workflows/ci.yml            # GitHub Actions CI/CD
+│
+├── devops-go/                          # Go DevOps Suite (7 tools)
+│   ├── monitor/                        # Health monitor
+│   ├── notifier/                       # GitHub deploy watcher
+│   ├── dbstats/                        # MongoDB analytics
+│   ├── deals-cli/                      # CLI deal management
+│   ├── metrics/                        # Performance metrics
+│   ├── deals-infra/                    # Terraform infrastructure manager
+│   ├── watchdog/                       # Multi-cloud deploy + auto-failover
+│   └── GOLANG-DEVOPS-MANIFESTO.md     # Complete DevOps reference (7 tools)
 │
 ├── src/
 │   ├── app/
-│   │   ├── page.tsx                    # Main dashboard (force-dynamic)
+│   │   ├── page.tsx                    # Main dashboard
 │   │   ├── layout.tsx                  # Root layout + AI chat
 │   │   ├── globals.css                 # All styles
-│   │   ├── admin/
-│   │   │   └── page.tsx                # Admin panel (force-dynamic)
+│   │   ├── admin/page.tsx              # Admin panel
 │   │   └── api/
-│   │       ├── deals/
-│   │       │   ├── route.ts            # CRUD for deals
-│   │       │   ├── seed/route.ts       # Seed 155 historical deals
-│   │       │   ├── migrate/route.ts    # Set reviewStatus on existing deals
-│   │       │   └── fix-dates/route.ts  # Fix year-based sorting
-│   │       ├── health/route.ts         # Health check for UptimeRobot
-│   │       ├── ai-chat/route.ts        # AI analyst (delivery + controversy)
-│   │       ├── extract-deal/route.ts   # URL/text → structured deal
-│   │       ├── admin/review/route.ts   # Approve / reject pending deals
-│   │       └── cron/fetch-deals/route.ts # Daily auto-scan (9AM UTC)
+│   │       ├── deals/route.ts          # CRUD for deals
+│   │       ├── health/route.ts         # Health check endpoint
+│   │       ├── ai-chat/route.ts        # AI analyst
+│   │       ├── extract-deal/route.ts   # URL/text → deal
+│   │       ├── admin/review/route.ts   # Approve / reject
+│   │       └── cron/fetch-deals/       # Daily auto-scan
 │   │
 │   ├── components/
 │   │   ├── Navbar.tsx
-│   │   ├── StatCard.tsx                # Dashboard metric cards
-│   │   ├── DealCard.tsx                # Deal card with type-colored borders
-│   │   ├── DealsList.tsx               # Filterable grid + side panel
-│   │   ├── AdminPanel.tsx              # Full admin UI (4 tabs + seed button)
-│   │   └── DealsAI.tsx                 # Floating AI chat panel
+│   │   ├── StatCard.tsx
+│   │   ├── DealCard.tsx
+│   │   ├── DealsList.tsx
+│   │   ├── AdminPanel.tsx
+│   │   └── DealsAI.tsx                 # Floating AI chat
 │   │
 │   └── lib/
-│       ├── mongodb.ts                  # DB connection
-│       ├── dealExtractor.ts            # Groq AI extraction logic
-│       └── seed.ts                     # 155 historical deals (1947–2026)
+│       ├── mongodb.ts
+│       ├── dealExtractor.ts            # Groq AI extraction
+│       └── seed.ts                     # 164 historical deals
 │
-├── vercel.json                         # Cron schedule (daily 9AM UTC)
-├── .env.local                          # Environment variables (local only)
+├── vercel.json                         # Cron schedule
+├── .env.local                          # Local env vars
 └── README.md
 ```
 
@@ -338,7 +355,7 @@ npm install
 
 ### 2. Set Up Environment Variables
 
-Create `.env.local` in the root:
+Create `.env.local`:
 
 ```env
 MONGODB_URI=mongodb+srv://<user>:<password>@cluster0.xxxxx.mongodb.net/finbank?retryWrites=true&w=majority
@@ -352,9 +369,8 @@ NEXT_PUBLIC_CRON_SECRET=same_value_as_cron_secret
 |----------|-------------|------|
 | `MONGODB_URI` | [mongodb.com/atlas](https://mongodb.com/atlas) | Free |
 | `NEWS_API_KEY` | [newsapi.org](https://newsapi.org) | Free |
-| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) | Free (100K tokens/day) |
+| `GROQ_API_KEY` | [console.groq.com](https://console.groq.com) | Free |
 | `CRON_SECRET` | Any random string | — |
-| `NEXT_PUBLIC_CRON_SECRET` | Same as CRON_SECRET | — |
 
 ### 3. Run Locally
 
@@ -366,67 +382,43 @@ npm run dev
 
 ### 4. Seed Historical Data
 
-Go to **Admin Panel → Auto-Scan tab → "Seed 155 Historical Deals"** button. Click once. Done.
+Go to **Admin Panel → Auto-Scan tab → "Seed Historical Deals"** button.
 
 ---
 
-## 🌐 Deploying to Vercel
+## 🌐 Deploying
 
-### Step 1 — Push to GitHub
-
+### Primary — Vercel
 ```bash
-git add .
-git commit -m "initial commit"
-git push origin main
+git push origin main   # GitHub Actions runs → Vercel auto-deploys
 ```
 
-### Step 2 — Connect to Vercel
+### Backup — Render (via Go + Terraform)
+```bash
+brew install terraform
 
-1. Go to [vercel.com](https://vercel.com) → New Project
-2. Import your GitHub repo
-3. Add all 5 environment variables in **Settings → Environment Variables**
-4. Deploy
+export RENDER_API_TOKEN="rnd_..."
+export RENDER_OWNER_ID="tea-..."   # from: curl -H "Authorization: Bearer <token>" https://api.render.com/v1/owners?limit=1
 
-### Step 3 — Set Up GitHub Actions Secrets
-
-Go to your GitHub repo → **Settings → Secrets and variables → Actions** → Add:
-
-```
-MONGODB_URI
-NEWS_API_KEY
-GROQ_API_KEY
-CRON_SECRET
+cd devops-go/watchdog
+go run main.go deploy render
+# ✅ Live at https://india-deals-tracker.onrender.com
 ```
 
-Now every `git push` runs the CI pipeline automatically.
-
-### Step 4 — Set Up UptimeRobot
-
-1. Create free account at [uptimerobot.com](https://uptimerobot.com)
-2. Add new monitor → HTTP(S)
-3. URL: `https://your-site.vercel.app/api/health`
-4. Interval: Every 5 minutes
-5. Add your email for alerts
-
-### Step 5 — Set Up Branch Protection
-
-GitHub → Settings → Branches → Add rule:
-- Branch: `main`
-- ✅ Require status checks: `lint-and-typecheck`, `build`
-- ✅ Require branches to be up to date
+### Any Other Cloud
+```bash
+go run main.go deploy railway
+go run main.go deploy vercel
+```
 
 ---
 
 ## 🔄 How the Auto-Scan Works
 
 ```
-Daily at 9:00 AM UTC (Vercel Cron)
+Daily at 9:00 AM UTC
         ↓
 NewsAPI: 4 India-specific queries
-  • "India defence deal signed 2025"
-  • "India trade agreement bilateral 2025"
-  • "India strategic partnership signed"
-  • "India arms deal fighter jet submarine"
         ↓
 ~8 articles fetched per run
         ↓
@@ -437,36 +429,22 @@ Each article → Groq AI extracts:
         ↓
 Saved as reviewStatus: "pending"
         ↓
-Admin → Review Queue shows new deals
-        ↓
-Approve → live on dashboard instantly
-Reject  → discarded permanently
+Admin → Review Queue → Approve / Reject
 ```
 
 ---
 
 ## 🧠 AI Analyst Capabilities
 
-The DealsAI chat knows:
-
-**📊 Delivery Tracking:**
+The AI chat knows delivery tracking for every major deal:
 - Rafale 36-jet: 36/36 ✅ delivered Dec 2022
 - S-400: 3/5 regiments delivered (2 delayed by Ukraine war)
 - MQ-9B Predator: 0/31 — deal still being finalised
-- GE F414 engines: 0/200 — HAL production line not started yet
-- And more for every major deal
 
-**⚖️ Controversy & Both Sides:**
+And full controversy coverage:
 - Rafale pricing controversy — Congress allegations vs CAG vindication
 - AgustaWestland corruption — proven, deal cancelled
 - Bofors scandal — led to 30-year artillery freeze
-- FGFA/Su-57 walkout — all 5 reasons India exited in 2018
-- F-35 kill switch — why India never pursued it
-
-**🔍 Analyst Verdict:**
-- Always gives both sides before a conclusion
-- Cites CAG audits, court verdicts, official statements
-- Never whitewashes problems
 
 ---
 
@@ -476,7 +454,7 @@ The DealsAI chat knows:
 interface Deal {
   title: string;
   country: string;
-  value: string;           // Billions USD as string e.g. "8.7"
+  value: string;           // Billions USD e.g. "8.7"
   status: 'Proposed' | 'Signed' | 'In Progress' | 'Ongoing' | 'Completed';
   type: 'Defense Acquisition' | 'Trade' | 'Technology' | 'Energy' | 'Diplomatic';
   impact: 'High Impact' | 'Medium Impact' | 'Low Impact';
@@ -484,13 +462,9 @@ interface Deal {
   strategicIntent: string;
   whyIndiaNeedsThis: string;
   keyItems: string[];
-  date: string;            // e.g. "September 2016" or "2023"
-
-  // Workflow metadata
+  date: string;
   reviewStatus: 'approved' | 'pending' | 'rejected';
-  sourceUrl?: string;      // For AI-fetched deals
-  sourceTitle?: string;
-  fetchedAt?: Date;
+  sourceUrl?: string;
   createdAt: Date;
 }
 ```
@@ -499,14 +473,14 @@ interface Deal {
 
 ## 🗺️ Roadmap
 
+- [ ] Telegram alerts when Vercel goes down (via watchdog)
 - [ ] Sentry error tracking integration
 - [ ] Rate limiting on API routes (Upstash Redis)
-- [ ] Email/Telegram alerts when high-impact deals detected
-- [ ] Historical value charts (deal values over time by country)
+- [ ] Historical value charts by country over time
 - [ ] Export to PDF / CSV
 - [ ] Twitter/X bot that posts newly approved deals
-- [ ] Compare mode — side-by-side deal comparison
 - [ ] MongoDB Atlas Vector Search for smarter AI context
+- [ ] Deploy Go monitor 24/7 on Render (runs even when Mac is off)
 - [ ] Preview deployments on dev branch before merging to main
 
 ---
@@ -517,8 +491,10 @@ interface Deal {
 - [NewsAPI](https://newsapi.org) — news aggregation
 - [MongoDB Atlas](https://mongodb.com/atlas) — free cloud database
 - [Vercel](https://vercel.com) — hosting + cron jobs
+- [Render](https://render.com) — backup cloud hosting
 - [GitHub Actions](https://github.com/features/actions) — free CI/CD
 - [UptimeRobot](https://uptimerobot.com) — free uptime monitoring
+- [Terraform](https://terraform.io) — infrastructure as code
 - Every journalist who covered these deals 📰
 
 ---
@@ -532,5 +508,7 @@ MIT — do whatever you want with it.
 <p align="center">
   Built with ❤️ for India's strategic future 🇮🇳
   <br/>
-  <strong>155 deals tracked · $2,465B total value · 34 partner nations</strong>
+  <strong>164 deals tracked · $2,008B total value · 35 partner nations</strong>
+  <br/>
+  <strong>2 clouds · 7 Go tools · $0/month</strong>
 </p>
